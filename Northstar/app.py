@@ -112,14 +112,7 @@ holdings = parse_schwab_csv(DATA_FILE)
 if not holdings:
     st.stop()
 
-# =========================================================
-# CALCULATIONS
-# =========================================================
 
-total_value = sum(h["value"] for h in holdings)
-annual_income = sum(h["annual_income"] for h in holdings)
-monthly_income = annual_income / 12
-portfolio_yield = annual_income / total_value if total_value else 0
 
 # =========================================================
 # SAVE TO DATABASE
