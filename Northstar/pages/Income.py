@@ -90,7 +90,16 @@ st.divider()
 
 st.subheader("Yield Distribution")
 
-st.hist(df["yield"], bins=10)
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots()
+ax.hist(df["yield"], bins=10)
+
+ax.set_title("Yield Distribution")
+ax.set_xlabel("Yield")
+ax.set_ylabel("Holdings")
+
+st.pyplot(fig)
 
 st.divider()
 
