@@ -1,40 +1,17 @@
 import json
+import csv
 import datetime
 from pathlib import Path
 import yfinance as yf
-import pandas as pd
 
 # -----------------------------
 # CONFIG
 # -----------------------------
 HISTORY_FILE = "northstar_history.json"
+SCHWAB_FILE = "schwab.csv"
 
 # -----------------------------
-# SAMPLE PORTFOLIO
-# -----------------------------
-SAMPLE_PORTFOLIO = {
-    "portfolio": [
-        {"ticker": "AAPL", "shares": 10},
-        {"ticker": "MSFT", "shares": 8},
-        {"ticker": "SCHD", "shares": 25}
-    ]
-}
-
-# -----------------------------
-# LOAD PORTFOLIO
-# -----------------------------
-def load_portfolio(file_path="data.json"):
-    path = Path(file_path)
-
-    if not path.exists():
-        print("⚠️ Using sample portfolio.\n")
-        return SAMPLE_PORTFOLIO["portfolio"]
-
-    with open(path, "r") as f:
-        return json.load(f)["portfolio"]
-
-# -----------------------------
-# PRICE ENGINE (robust)
+# PRICE ENGINE (live, optional)
 # -----------------------------
 def get_price(ticker):
     try:
@@ -50,45 +27,78 @@ def get_price(ticker):
             if not hist.empty:
                 price = hist["Close"].iloc[-1]
 
-        return float(price) if price is not None else 0.0
+        return float(price) if price else 0.0
 
     except Exception:
         return 0.0
 
 # -----------------------------
-# DIVIDEND ENGINE (FIXED + SAFE)
+# SCHWAB CSV IMPORT (CORE)
 # -----------------------------
-def get_annual_dividend_per_share(ticker):
-    try:
-        stock = yf.Ticker(ticker)
-        divs = stock.dividends
+def import_schwab(csv_file):
+    path = Path(csv_file)
 
-        if divs is None or divs.empty:
-            return 0.0
+    if not path.exists():
+        print(f"❌ Schwab file not found: {csv_file}")
+        return []
 
-        # ensure clean datetime index
-        divs = divs.copy()
-        divs.index = pd.to_datetime(divs.index)
+    holdings = []
 
-        one_year_ago = divs.index.max() - pd.Timedelta(days=365)
+    with open(path, "r", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
 
-        last_year_divs = divs[divs.index >= one_year_ago]
+        if not reader.fieldnames:
+            print("❌ Invalid CSV format")
+            return []
 
-        total = last_year_divs.sum()
+        def find(col_options):
+            for c in reader.fieldnames:
+                for opt in col_options:
+                    if opt.lower() in c.lower():
+                        return c
+            return None
 
-        if pd.isna(total):
-            return 0.0
+        symbol_col = find(["symbol", "ticker"])
+        qty_col = find(["quantity", "shares", "qty"])
+        cost_col = find(["cost", "cost basis"])
 
-        return float(total)
+        if not symbol_col or not qty_col:
+            print("❌ Could not detect required Schwab columns")
+            print("Found:", reader.fieldnames)
+            return []
 
-    except Exception:
-        return 0.0
+        for row in reader:
+            try:
+                ticker = row[symbol_col].strip().upper()
+                shares = float(row[qty_col])
+
+                if not ticker or shares <= 0:
+                    continue
+
+                cost = None
+                if cost_col and row.get(cost_col):
+                    try:
+                        cost = float(row[cost_col])
+                    except:
+                        cost = None
+
+                holdings.append({
+                    "ticker": ticker,
+                    "shares": shares,
+                    "cost_basis": cost
+                })
+
+            except Exception:
+                continue
+
+    return holdings
 
 # -----------------------------
-# ANALYSIS ENGINE
+# ANALYSIS ENGINE (BROKER-BASED)
 # -----------------------------
 def analyze(holdings):
     total_value = 0
+    total_cost = 0
     enriched = []
     allocation = {}
 
@@ -99,136 +109,90 @@ def analyze(holdings):
         price = get_price(ticker)
         value = price * shares
 
-        div_per_share = get_annual_dividend_per_share(ticker)
-
-        income = shares * div_per_share
-
-        enriched.append({
-            "ticker": ticker,
-            "shares": shares,
-            "price": price,
-            "value": value,
-            "div_per_share": div_per_share,
-            "income": income
-        })
+        cost = h.get("cost_basis")
+        if cost:
+            total_cost += cost
 
         total_value += value
         allocation[ticker] = value
+
+        enriched.append({
+            **h,
+            "price": price,
+            "value": value
+        })
 
     allocation_pct = {
         k: (v / total_value) * 100 if total_value > 0 else 0
         for k, v in allocation.items()
     }
 
-    total_income = sum(h["income"] for h in enriched)
-
     return {
-        "total": total_value,
+        "total_value": total_value,
+        "total_cost": total_cost,
         "holdings": enriched,
-        "allocation": allocation_pct,
-        "income": total_income
+        "allocation": allocation_pct
     }
 
 # -----------------------------
-# INTELLIGENCE LAYER
+# PERFORMANCE (REAL RETURN IF COST AVAILABLE)
 # -----------------------------
-def intelligence(data):
+def performance(data):
+    if data["total_cost"] > 0:
+        return ((data["total_value"] - data["total_cost"]) / data["total_cost"]) * 100
+    return None
+
+# -----------------------------
+# SIMPLE INTELLIGENCE
+# -----------------------------
+def intelligence(data, perf):
     largest = max(data["allocation"].values()) if data["allocation"] else 0
 
     return {
-        "largest_pct": largest,
         "holdings": len(data["holdings"]),
-        "monthly_income": data["income"] / 12,
-        "annual_income": data["income"]
-    }
-
-# -----------------------------
-# HISTORY
-# -----------------------------
-def load_history():
-    p = Path(HISTORY_FILE)
-    if not p.exists():
-        return []
-    return json.load(open(p))
-
-def save_history(entry):
-    hist = load_history()
-    hist.append(entry)
-    json.dump(hist, open(HISTORY_FILE, "w"), indent=2)
-
-def snapshot(data):
-    return {
-        "timestamp": datetime.datetime.now().isoformat(),
-        "value": data["total"]
-    }
-
-# -----------------------------
-# PERFORMANCE
-# -----------------------------
-def performance(hist):
-    if len(hist) < 2:
-        return None
-
-    hist = sorted(hist, key=lambda x: x["timestamp"])
-
-    start = hist[0]["value"]
-    end = hist[-1]["value"]
-
-    if start == 0:
-        return None
-
-    pct = ((end - start) / start) * 100
-
-    trend = "up" if pct > 1 else "down" if pct < -1 else "flat"
-
-    return {
-        "start": start,
-        "end": end,
-        "pct": pct,
-        "trend": trend
+        "largest_pct": largest,
+        "return_pct": perf
     }
 
 # -----------------------------
 # CHAT ENGINE
 # -----------------------------
-def ask(question, data, intel, perf):
-    q = question.lower()
+def ask(q, data, intel):
+    q = q.lower()
 
     if "value" in q or "worth" in q:
-        return f"Portfolio value: ${data['total']:.2f}"
+        return f"Portfolio value: ${data['total_value']:.2f}"
 
-    if "income" in q or "dividend" in q:
-        return f"Estimated monthly income: ${intel['monthly_income']:.2f}"
-
-    if "risk" in q or "divers" in q:
-        if intel["largest_pct"] > 40:
-            return "High concentration risk detected."
-        return "Diversification looks reasonable."
+    if "return" in q or "performance" in q:
+        if intel["return_pct"] is not None:
+            return f"Total return: {intel['return_pct']:.2f}%"
+        return "Return unavailable (missing cost basis)."
 
     if "holdings" in q:
         return "Holdings: " + ", ".join([h["ticker"] for h in data["holdings"]])
 
-    if "performance" in q or "return" in q:
-        if perf:
-            return f"Return: {perf['pct']:.2f}% ({perf['trend']})"
-        return "Not enough history yet."
+    if "risk" in q:
+        if intel["largest_pct"] > 40:
+            return "High concentration risk detected."
+        return "Diversification looks reasonable."
 
-    return "Ask: value, income, risk, holdings, performance."
+    return "Ask: value, return, holdings, risk."
 
 # -----------------------------
-# MAIN LOOP
+# MAIN
 # -----------------------------
 def main():
-    holdings = load_portfolio("data.json")
+    holdings = import_schwab(SCHWAB_FILE)
+
+    if not holdings:
+        print("No holdings loaded.")
+        return
+
     data = analyze(holdings)
-    intel = intelligence(data)
+    perf = performance(data)
+    intel = intelligence(data, perf)
 
-    hist = load_history()
-    perf = performance(hist)
-
-    save_history(snapshot(data))
-
-    print("\nNORTHSTAR v0.9 (STABLE INCOME ENGINE)")
+    print("\nNORTHSTAR v1.0 (BROKER-GRADE MODE)")
     print("Type 'exit' to quit\n")
 
     while True:
@@ -236,7 +200,7 @@ def main():
         if q.lower() in ["exit", "quit"]:
             break
 
-        print("NorthStar:", ask(q, data, intel, perf))
+        print("NorthStar:", ask(q, data, intel))
 
 # -----------------------------
 # RUN
