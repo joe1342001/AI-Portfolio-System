@@ -9,7 +9,7 @@ import yfinance as yf
 HISTORY_FILE = "northstar_history.json"
 
 # -----------------------------
-# PORTFOLIO
+# SAMPLE PORTFOLIO
 # -----------------------------
 SAMPLE_PORTFOLIO = {
     "portfolio": [
@@ -39,12 +39,11 @@ def get_price(ticker):
     try:
         stock = yf.Ticker(ticker)
 
-        # primary
         price = None
+
         if hasattr(stock, "fast_info"):
             price = stock.fast_info.get("lastPrice")
 
-        # fallback
         if price is None:
             hist = stock.history(period="1d")
             if not hist.empty:
@@ -56,29 +55,29 @@ def get_price(ticker):
         return 0.0
 
 # -----------------------------
-# DIVIDEND YIELD ENGINE (NEW)
+# REAL DIVIDEND ENGINE (FIXED)
 # -----------------------------
-def get_dividend_yield(ticker):
+def get_annual_dividend_per_share(ticker):
     try:
         stock = yf.Ticker(ticker)
-        div = None
+        divs = stock.dividends
 
-        if hasattr(stock, "info"):
-            div = stock.info.get("dividendYield")
-
-        if div is None:
+        if divs is None or divs.empty:
             return 0.0
 
-        return float(div)
+        # last 12 months total dividends per share
+        last_year = divs.last("365D").sum()
+
+        return float(last_year)
 
     except Exception:
         return 0.0
 
 # -----------------------------
-# ANALYSIS
+# ANALYSIS ENGINE
 # -----------------------------
 def analyze(holdings):
-    total = 0
+    total_value = 0
     enriched = []
     allocation = {}
 
@@ -86,33 +85,37 @@ def analyze(holdings):
         price = get_price(h["ticker"])
         value = price * h["shares"]
 
+        div_per_share = get_annual_dividend_per_share(h["ticker"])
+        income = h["shares"] * div_per_share
+
         enriched.append({
             "ticker": h["ticker"],
             "shares": h["shares"],
             "price": price,
             "value": value,
-            "dividend_yield": get_dividend_yield(h["ticker"])
+            "div_per_share": div_per_share,
+            "income": income
         })
 
-        total += value
+        total_value += value
         allocation[h["ticker"]] = value
 
     allocation_pct = {
-        k: (v / total) * 100 if total > 0 else 0
+        k: (v / total_value) * 100 if total_value > 0 else 0
         for k, v in allocation.items()
     }
 
-    income = sum(h["value"] * h["dividend_yield"] for h in enriched)
+    total_income = sum(h["income"] for h in enriched)
 
     return {
-        "total": total,
+        "total": total_value,
         "holdings": enriched,
         "allocation": allocation_pct,
-        "income": income
+        "income": total_income
     }
 
 # -----------------------------
-# INTELLIGENCE LAYER
+# INTELLIGENCE
 # -----------------------------
 def intelligence(data):
     largest = max(data["allocation"].values()) if data["allocation"] else 0
@@ -128,10 +131,10 @@ def intelligence(data):
 # HISTORY
 # -----------------------------
 def load_history():
-    path = Path(HISTORY_FILE)
-    if not path.exists():
+    p = Path(HISTORY_FILE)
+    if not p.exists():
         return []
-    return json.load(open(path))
+    return json.load(open(p))
 
 def save_history(entry):
     hist = load_history()
@@ -195,7 +198,7 @@ def ask(question, data, intel, perf):
             return f"Return: {perf['pct']:.2f}% ({perf['trend']})"
         return "Not enough history yet."
 
-    return "Try asking about value, income, risk, holdings, or performance."
+    return "Ask about value, income, risk, holdings, or performance."
 
 # -----------------------------
 # MAIN LOOP
@@ -210,7 +213,7 @@ def main():
 
     save_history(snapshot(data))
 
-    print("\nNORTHSTAR v0.8 (CLEAN BUILD)")
+    print("\nNORTHSTAR v0.9.1 (ACCURATE INCOME MODEL)")
     print("Type 'exit' to quit\n")
 
     while True:
