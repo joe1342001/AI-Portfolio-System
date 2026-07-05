@@ -1,146 +1,134 @@
+import sys
+from pathlib import Path
+
+# =========================================================
+# STREAMLIT IMPORT FIX
+# =========================================================
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 import streamlit as st
-from core.parser import load_schwab_csv
-from core.pricing import update_market_values
-from core.dividends import enrich_income
+import pandas as pd
 
-st.set_page_config(page_title="Retirement", layout="wide")
+from core.portfolio import load_portfolio
 
-st.title("🧮 Retirement Simulator")
+# =========================================================
+# PAGE SETUP
+# =========================================================
 
+st.set_page_config(page_title="NorthStar Retirement", layout="wide")
+st.title("🏁 Retirement Planner")
 
-# -----------------------------
-# LOAD DATA
-# -----------------------------
-@st.cache_data
-def load_data():
-    holdings = load_schwab_csv("data/schwab.csv")
-    holdings = update_market_values(holdings)
-    holdings, total_income = enrich_income(holdings)
-    return holdings, total_income
+# =========================================================
+# LOAD PORTFOLIO
+# =========================================================
 
+holdings = load_portfolio()
 
-holdings, base_income = load_data()
+if not holdings:
+    st.warning("No holdings found.")
+    st.stop()
 
-portfolio_value = sum(h["live_value"] for h in holdings)
+df = pd.DataFrame(holdings)
 
+# =========================================================
+# CORE METRICS
+# =========================================================
 
-# -----------------------------
+portfolio_value = df["value"].sum()
+annual_income = df["annual_income"].sum()
+monthly_income = annual_income / 12
+yield_pct = (annual_income / portfolio_value) * 100 if portfolio_value else 0
+
+# =========================================================
 # USER INPUTS
-# -----------------------------
-st.subheader("Inputs")
+# =========================================================
+
+st.subheader("Assumptions")
 
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    current_age = st.number_input("Current Age", value=55)
+    current_age = st.number_input("Current Age", 18, 100, 55)
 
 with col2:
-    retirement_age = st.selectbox("Retirement Age", [60, 62, 65, 70])
+    retirement_age = st.number_input("Retirement Age", 40, 100, 65)
 
 with col3:
-    years = retirement_age - current_age
+    monthly_expenses = st.number_input("Monthly Expenses ($)", 500, 50000, 5000)
 
+years_to_retire = retirement_age - current_age
 
-col4, col5 = st.columns(2)
+# =========================================================
+# PROJECTIONS (SIMPLE BUT STABLE MODEL)
+# =========================================================
 
-with col4:
-    weekly_contribution = st.number_input("Weekly Contribution ($)", value=250)
+# Conservative assumptions (can upgrade later)
+growth_rate = 0.06   # 6% portfolio growth
+income_growth = 0.03 # dividend growth
 
-with col5:
-    expected_return = st.slider("Expected Annual Return (%)", 3.0, 10.0, 6.5) / 100
+future_value = portfolio_value * ((1 + growth_rate) ** years_to_retire)
+future_income = annual_income * ((1 + income_growth) ** years_to_retire)
 
+future_monthly_income = future_income / 12
 
-dividend_reinvest = st.checkbox("Reinvest Dividends", value=True)
+# =========================================================
+# OUTPUT METRICS
+# =========================================================
 
-
-st.divider()
-
-
-# -----------------------------
-# PROJECTIONS
-# -----------------------------
-
-def project_future_value(pv, contribution, years, rate):
-    weekly_rate = rate / 52
-    value = pv
-
-    for _ in range(int(years * 52)):
-        value *= (1 + weekly_rate)
-        value += contribution
-
-    return value
-
-
-future_value = project_future_value(
-    portfolio_value,
-    weekly_contribution,
-    years,
-    expected_return
-)
-
-
-# dividend yield (derived from current income)
-current_yield = base_income / portfolio_value if portfolio_value else 0
-
-if dividend_reinvest:
-    projected_income = future_value * current_yield
-else:
-    projected_income = future_value * (current_yield * 0.6)
-
-
-monthly_income = projected_income / 12
-
-
-# -----------------------------
-# RESULTS
-# -----------------------------
-st.subheader("Projection Results")
+st.subheader("Retirement Projection")
 
 col1, col2, col3 = st.columns(3)
 
-with col1:
-    st.metric("Projected Portfolio", f"${future_value:,.2f}")
-
-with col2:
-    st.metric("Annual Income", f"${projected_income:,.2f}")
-
-with col3:
-    st.metric("Monthly Income", f"${monthly_income:,.2f}")
-
+col1.metric("Projected Portfolio Value", f"${future_value:,.2f}")
+col2.metric("Projected Annual Income", f"${future_income:,.2f}")
+col3.metric("Projected Monthly Income", f"${future_monthly_income:,.2f}")
 
 st.divider()
 
-
-# -----------------------------
+# =========================================================
 # RETIREMENT READINESS
-# -----------------------------
+# =========================================================
+
 st.subheader("Retirement Readiness")
 
-target_income = st.number_input("Desired Monthly Income", value=5000)
-
-if monthly_income >= target_income:
-    st.success("On track to meet your retirement goal.")
+if future_monthly_income >= monthly_expenses:
+    st.success("✅ You are on track for retirement income coverage")
 else:
-    gap = target_income - monthly_income
-    st.warning(f"You are short by ${gap:,.2f} per month.")
-
+    gap = monthly_expenses - future_monthly_income
+    st.error(f"❌ Income gap of ${gap:,.2f} per month")
 
 st.divider()
 
+# =========================================================
+# CURRENT POSITION SUMMARY
+# =========================================================
 
-# -----------------------------
-# SIMPLE INSIGHT ENGINE
-# -----------------------------
-st.subheader("AI Insight")
+st.subheader("Current Portfolio Snapshot")
 
-if years < 10:
-    st.info("Short time horizon increases risk sensitivity.")
+col1, col2, col3 = st.columns(3)
 
-if expected_return > 8:
-    st.warning("Return assumption is aggressive.")
+col1.metric("Portfolio Value", f"${portfolio_value:,.2f}")
+col2.metric("Annual Income", f"${annual_income:,.2f}")
+col3.metric("Yield", f"{yield_pct:.2f}%")
 
-if weekly_contribution > 500:
-    st.info("High contribution rate significantly accelerates compounding.")
+st.divider()
 
-if current_yield > 0.07:
-    st.success("Portfolio is income-efficient for retirement.")
+# =========================================================
+# HOLDINGS TABLE
+# =========================================================
+
+st.subheader("Holdings")
+
+st.dataframe(
+    df.sort_values("value", ascending=False),
+    use_container_width=True
+)
+
+# =========================================================
+# ASSUMPTIONS NOTE
+# =========================================================
+
+st.info(
+    "Projection assumes constant contributions are NOT included and uses "
+    "simple growth models (6% capital growth, 3% dividend growth)."
+)
