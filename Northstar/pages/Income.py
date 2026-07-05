@@ -1,107 +1,102 @@
+import sys
+from pathlib import Path
+
+# =========================================================
+# STREAMLIT IMPORT FIX
+# =========================================================
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 import streamlit as st
+import pandas as pd
 
-from core.parser import load_schwab_csv
-from core.pricing import update_market_values
-from core.dividends import enrich_income
+from core.portfolio import load_portfolio
+from core.dividends import enrich_with_dividends
 
-st.set_page_config(page_title="Income", layout="wide")
+# =========================================================
+# PAGE SETUP
+# =========================================================
 
-st.title("💰 Dividend Income Dashboard")
+st.set_page_config(page_title="NorthStar Income", layout="wide")
+st.title("💰 NorthStar Income Dashboard")
 
-
-# -----------------------------
+# =========================================================
 # LOAD DATA
-# -----------------------------
-@st.cache_data
-def load_data():
-    holdings = load_schwab_csv("data/schwab.csv")
-    holdings = update_market_values(holdings)
-    holdings, total_income = enrich_income(holdings)
-    return holdings, total_income
+# =========================================================
 
+holdings = load_portfolio()
 
-holdings, total_income = load_data()
+if not holdings:
+    st.warning("No holdings found.")
+    st.stop()
 
+# IMPORTANT: ensure income is applied here (safe re-run)
+holdings = enrich_with_dividends(holdings)
+
+df = pd.DataFrame(holdings)
+
+# =========================================================
+# CORE METRICS
+# =========================================================
+
+total_value = df["value"].sum()
+total_income = df["annual_income"].sum()
 monthly_income = total_income / 12
+yield_pct = (total_income / total_value) * 100 if total_value else 0
 
+col1, col2, col3, col4 = st.columns(4)
 
-# -----------------------------
-# SUMMARY METRICS
-# -----------------------------
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.metric("Annual Income", f"${total_income:,.2f}")
-
-with col2:
-    st.metric("Monthly Income", f"${monthly_income:,.2f}")
-
-with col3:
-    yield_on_portfolio = total_income / sum(h["live_value"] for h in holdings)
-    st.metric("Yield", f"{yield_on_portfolio*100:.2f}%")
-
+col1.metric("Portfolio Value", f"${total_value:,.2f}")
+col2.metric("Annual Income", f"${total_income:,.2f}")
+col3.metric("Monthly Income", f"${monthly_income:,.2f}")
+col4.metric("Yield", f"{yield_pct:.2f}%")
 
 st.divider()
 
-
-# -----------------------------
+# =========================================================
 # INCOME BY HOLDING
-# -----------------------------
-st.subheader("Income by Holding")
+# =========================================================
 
-income_table = []
+st.subheader("Top Income Generators")
 
-for h in holdings:
-    income_table.append({
-        "Ticker": h["ticker"],
-        "Value": h["live_value"],
-        "Yield": f"{h['yield']*100:.2f}%",
-        "Annual Income": h["annual_income"],
-        "Monthly Income": h["monthly_income"],
-    })
+income_df = df.sort_values("annual_income", ascending=False)
 
-income_table = sorted(income_table, key=lambda x: x["Annual Income"], reverse=True)
+st.bar_chart(income_df.set_index("ticker")["annual_income"])
 
-st.dataframe(income_table, use_container_width=True)
-
+st.dataframe(
+    income_df[["ticker", "value", "yield", "annual_income"]],
+    use_container_width=True
+)
 
 st.divider()
 
+# =========================================================
+# INCOME BY ASSET TYPE
+# =========================================================
 
-# -----------------------------
-# TOP INCOME CONTRIBUTORS
-# -----------------------------
-st.subheader("Top Income Contributors")
+st.subheader("Income by Asset Type")
 
-top = income_table[:10]
+grouped = df.groupby("asset_type")[["annual_income", "value"]].sum()
+grouped["yield"] = grouped["annual_income"] / grouped["value"]
 
-for h in top:
-    st.write(
-        f"**{h['Ticker']}** → "
-        f"${h['Annual Income']:,.2f}/yr "
-        f"(${h['Monthly Income']:,.2f}/mo)"
-    )
+st.bar_chart(grouped["annual_income"])
 
+st.dataframe(grouped, use_container_width=True)
 
 st.divider()
 
+# =========================================================
+# YIELD DISTRIBUTION
+# =========================================================
 
-# -----------------------------
-# INSIGHTS
-# -----------------------------
-st.subheader("AI Income Insights")
+st.subheader("Yield Distribution")
 
-if yield_on_portfolio > 0.08:
-    st.success("High-income portfolio (above 8% yield).")
+st.hist(df["yield"], bins=10)
 
-elif yield_on_portfolio > 0.05:
-    st.info("Moderate-income portfolio.")
+st.divider()
 
-else:
-    st.warning("Low-income portfolio — growth-oriented allocation detected.")
+# =========================================================
+# DEBUG VIEW
+# =========================================================
 
-# concentration risk
-top_weight = income_table[0]["Annual Income"] / total_income if total_income else 0
-
-if top_weight > 0.20:
-    st.warning("Income concentration risk: top holding exceeds 20% of income.")
+with st.expander("Raw Data"):
+    st.dataframe(df, use_container_width=True)
