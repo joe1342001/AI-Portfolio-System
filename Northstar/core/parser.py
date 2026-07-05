@@ -6,7 +6,7 @@ def get_base_path():
     return Path(__file__).resolve().parent.parent
 
 
-def load_schwab_csv_debug(file_path="data/schwab.csv"):
+def load_schwab_csv(file_path="data/schwab.csv"):
 
     st.write("🔍 STEP 1: Starting parser debug")
 
