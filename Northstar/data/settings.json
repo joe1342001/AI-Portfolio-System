@@ -1,1 +1,6 @@
-
+{
+    "expected_return": 0.065,
+    "inflation": 0.03,
+    "retirement_age": 65,
+    "target_monthly_income": 5000
+}
