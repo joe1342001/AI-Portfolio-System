@@ -1,75 +1,69 @@
-import csv
-import json
-from pathlib import Path
+def import_schwab(csv_file):
+    import csv
+    from pathlib import Path
 
-def detect_column(row_keys):
-    """
-    Try to find the correct Schwab column names automatically.
-    """
-    keys = [k.lower() for k in row_keys]
-
-    def find(possible):
-        for p in possible:
-            for k in keys:
-                if p in k:
-                    return row_keys[keys.index(k)]
-        return None
-
-    return {
-        "ticker": find(["symbol", "ticker"]),
-        "shares": find(["quantity", "shares", "qty"])
-    }
-
-
-def import_schwab(csv_file="schwab.csv"):
     path = Path(csv_file)
 
     if not path.exists():
-        print("❌ CSV file not found:", csv_file)
-        return
+        print("❌ File not found")
+        return []
 
-    portfolio = []
+    with open(path, "r", encoding="utf-8-sig") as f:
+        lines = f.readlines()
 
-    with open(path, "r", newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
+    # Find first real CSV header row
+    header_index = None
 
-        if not reader.fieldnames:
-            print("❌ Could not read CSV headers")
-            return
+    for i, line in enumerate(lines):
+        if "symbol" in line.lower() or "ticker" in line.lower():
+            header_index = i
+            break
 
-        columns = detect_column(reader.fieldnames)
+    if header_index is None:
+        print("❌ No valid holdings table found in CSV")
+        return []
 
-        if not columns["ticker"] or not columns["shares"]:
-            print("❌ Could not detect required columns.")
-            print("Found columns:", reader.fieldnames)
-            return
+    from io import StringIO
+    clean_csv = StringIO("".join(lines[header_index:]))
 
-        for row in reader:
-            try:
-                ticker = row[columns["ticker"]].strip().upper()
-                shares = float(row[columns["shares"]])
+    reader = csv.DictReader(clean_csv)
 
-                # skip empty or zero rows
-                if not ticker or shares <= 0:
-                    continue
+    holdings = []
 
-                portfolio.append({
-                    "ticker": ticker,
-                    "shares": shares
-                })
+    def find(col, options):
+        for o in options:
+            if o in col.lower():
+                return True
+        return False
 
-            except Exception:
+    for row in reader:
+        try:
+            # flexible column detection
+            ticker = None
+            shares = None
+
+            for k in row:
+                if find(k, ["symbol", "ticker"]):
+                    ticker = row[k]
+
+                if find(k, ["quantity", "shares", "qty"]):
+                    shares = row[k]
+
+            if not ticker or not shares:
                 continue
 
-    data = {"portfolio": portfolio}
+            ticker = ticker.strip().upper()
+            shares = float(shares)
 
-    with open("data.json", "w") as f:
-        json.dump(data, f, indent=2)
+            if shares <= 0:
+                continue
 
-    print("\n✅ Schwab import complete!")
-    print(f"Holdings imported: {len(portfolio)}")
-    print("Saved to data.json")
+            holdings.append({
+                "ticker": ticker,
+                "shares": shares
+            })
 
+        except Exception:
+            continue
 
-if __name__ == "__main__":
-    import_schwab("schwab.csv")
+    return holdings
