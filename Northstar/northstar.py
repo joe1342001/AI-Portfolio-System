@@ -1,6 +1,8 @@
 import json
+import datetime
 from pathlib import Path
 
+HISTORY_FILE = "northstar_history.json"
 
 # -----------------------------
 # SAMPLE DATA (fallback if no file)
@@ -78,6 +80,40 @@ def generate_report(analysis):
 
     print("-" * 40)
 
+def load_history():
+    path = Path(HISTORY_FILE)
+
+    if not path.exists():
+        return []
+
+    with open(path, "r") as f:
+        return json.load(f)
+
+def create_snapshot(analysis):
+    return {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "total_value": analysis["total_value"],
+        "yield": analysis["portfolio_yield"]
+    }
+
+def main():
+    holdings = load_portfolio("data.json")
+    analysis = analyze_portfolio(holdings)
+
+    generate_report(analysis)
+
+    # NEW: create and save snapshot
+    snapshot = create_snapshot(analysis)
+    save_history(snapshot)
+
+    print("\nSnapshot saved to history ✔")
+
+def save_history(entry):
+    history = load_history()
+    history.append(entry)
+
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=2)
 
 # -----------------------------
 # MAIN
