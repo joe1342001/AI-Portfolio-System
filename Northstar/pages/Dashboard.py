@@ -1,15 +1,12 @@
 import sys
 from pathlib import Path
 
-# =========================================================
-# FIX STREAMLIT IMPORT PATH (CRITICAL)
-# =========================================================
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st
 import pandas as pd
 
-from core.parser_debug import load_schwab_csv_debug as load_schwab_csv
+from core.portfolio import load_portfolio
 from database.database import load_snapshots
 
 # =========================================================
