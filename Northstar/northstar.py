@@ -8,10 +8,10 @@ import yfinance as yf
 # CONFIG
 # -----------------------------
 HISTORY_FILE = "northstar_history.json"
-CHART_FILE = "northstar_chart.png"
+PRICE_CACHE_FILE = "northstar_price_cache.json"
 
 # -----------------------------
-# SAMPLE PORTFOLIO (no prices needed anymore)
+# SAMPLE PORTFOLIO
 # -----------------------------
 SAMPLE_PORTFOLIO = {
     "portfolio": [
@@ -35,34 +35,67 @@ def load_portfolio(file_path="data.json"):
         return json.load(f)["portfolio"]
 
 # -----------------------------
-# LIVE PRICE ENGINE (NEW)
+# PRICE CACHE SYSTEM (NEW)
 # -----------------------------
-def get_live_price(ticker):
-    try:
-        stock = yf.Ticker(ticker)
-        price = stock.fast_info["lastPrice"]
-        return float(price)
-    except Exception:
-        print(f"⚠️ Price fetch failed for {ticker}, using fallback 0")
-        return 0.0
+def load_price_cache():
+    path = Path(PRICE_CACHE_FILE)
+    if not path.exists():
+        return {}
+    with open(path, "r") as f:
+        return json.load(f)
+
+def save_price_cache(cache):
+    with open(PRICE_CACHE_FILE, "w") as f:
+        json.dump(cache, f, indent=2)
 
 # -----------------------------
-# ANALYSIS ENGINE (UPDATED)
+# LIVE PRICE WITH RETRY + CACHE
+# -----------------------------
+def fetch_live_price(ticker, retries=2):
+    cache = load_price_cache()
+
+    # 1. try API
+    for attempt in range(retries):
+        try:
+            stock = yf.Ticker(ticker)
+            price = stock.fast_info["lastPrice"]
+
+            cache[ticker] = {
+                "price": float(price),
+                "timestamp": datetime.datetime.now().isoformat()
+            }
+
+            save_price_cache(cache)
+            return float(price)
+
+        except Exception:
+            continue
+
+    # 2. fallback to cache
+    if ticker in cache:
+        print(f"🛟 Using cached price for {ticker}")
+        return cache[ticker]["price"]
+
+    # 3. final fallback
+    print(f"⚠️ No price available for {ticker}, using 0")
+    return 0.0
+
+# -----------------------------
+# ANALYSIS ENGINE
 # -----------------------------
 def analyze_portfolio(holdings):
     total_value = 0
     allocation = {}
-
-    enriched_holdings = []
+    enriched = []
 
     for h in holdings:
-        price = get_live_price(h["ticker"])
+        price = fetch_live_price(h["ticker"])
         value = h["shares"] * price
 
         total_value += value
         allocation[h["ticker"]] = value
 
-        enriched_holdings.append({
+        enriched.append({
             **h,
             "price": price,
             "value": value
@@ -76,9 +109,8 @@ def analyze_portfolio(holdings):
     weighted_yield = 0
     dividend_income = 0
 
-    for h in enriched_holdings:
+    for h in enriched:
         weight = h["value"] / total_value if total_value > 0 else 0
-
         weighted_yield += weight * h["dividend_yield"]
         dividend_income += h["value"] * h["dividend_yield"]
 
@@ -87,7 +119,7 @@ def analyze_portfolio(holdings):
         "allocation_pct": allocation_pct,
         "portfolio_yield": weighted_yield,
         "annual_dividend_income": dividend_income,
-        "holdings": enriched_holdings
+        "holdings": enriched
     }
 
 # -----------------------------
@@ -116,7 +148,7 @@ def create_snapshot(analysis):
     }
 
 # -----------------------------
-# PERFORMANCE ENGINE
+# PERFORMANCE
 # -----------------------------
 def compute_performance(history):
     if not history:
@@ -141,7 +173,7 @@ def compute_performance(history):
     }
 
 # -----------------------------
-# INTELLIGENCE LAYER
+# INTELLIGENCE
 # -----------------------------
 def portfolio_intelligence(analysis):
     holdings = analysis["holdings"]
@@ -183,13 +215,13 @@ def ai_insight(analysis, performance, intel):
 # REPORT
 # -----------------------------
 def generate_report(analysis, performance=None, intel=None, insights=None):
-    print("\nNORTHSTAR REPORT (v0.7)")
+    print("\nNORTHSTAR REPORT (v0.7.1)")
     print("-" * 60)
 
     print(f"Total Value: ${analysis['total_value']:.2f}")
     print(f"Dividend Yield: {analysis['portfolio_yield'] * 100:.2f}%")
 
-    print("\nHoldings (Live Prices):")
+    print("\nHoldings:")
     for h in analysis["holdings"]:
         print(f"  {h['ticker']}: {h['shares']} shares @ ${h['price']:.2f} → ${h['value']:.2f}")
 
