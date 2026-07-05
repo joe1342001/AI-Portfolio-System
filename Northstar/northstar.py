@@ -34,7 +34,7 @@ def load_portfolio(file_path="data.json"):
         return json.load(f)["portfolio"]
 
 # -----------------------------
-# ANALYSIS ENGINE
+# CORE ANALYSIS
 # -----------------------------
 def analyze_portfolio(holdings):
     total_value = 0
@@ -51,38 +51,23 @@ def analyze_portfolio(holdings):
     }
 
     weighted_yield = 0
+    dividend_income = 0
+
     for h in holdings:
-        weight = (h["shares"] * h["price"]) / total_value
+        value = h["shares"] * h["price"]
+        weight = value / total_value
+
         weighted_yield += weight * h["dividend_yield"]
+
+        # annual dividend income per position
+        dividend_income += value * h["dividend_yield"]
 
     return {
         "total_value": total_value,
         "allocation_pct": allocation_pct,
-        "portfolio_yield": weighted_yield
+        "portfolio_yield": weighted_yield,
+        "annual_dividend_income": dividend_income
     }
-
-# -----------------------------
-# REPORT
-# -----------------------------
-def generate_report(analysis, performance=None):
-    print("\nNORTHSTAR REPORT (v0.4)")
-    print("-" * 45)
-
-    print(f"Total Portfolio Value: ${analysis['total_value']:.2f}")
-    print(f"Estimated Dividend Yield: {analysis['portfolio_yield'] * 100:.2f}%")
-
-    print("\nAllocation Breakdown:")
-    for ticker, pct in analysis["allocation_pct"].items():
-        print(f"  {ticker}: {pct:.2f}%")
-
-    if performance:
-        print("\nPERFORMANCE:")
-        print(f"Start: ${performance['start']:.2f}")
-        print(f"Current: ${performance['current']:.2f}")
-        print(f"Return: {performance['return_pct']:.2f}%")
-        print(f"Trend: {performance['trend']}")
-
-    print("-" * 45)
 
 # -----------------------------
 # HISTORY
@@ -136,7 +121,7 @@ def compute_performance(history):
     }
 
 # -----------------------------
-# CHART ENGINE (NEW)
+# CHART ENGINE
 # -----------------------------
 def generate_chart(history):
     if len(history) < 2:
@@ -148,14 +133,13 @@ def generate_chart(history):
     dates = [h["timestamp"] for h in history]
     values = [h["total_value"] for h in history]
 
-    # convert timestamps to readable x-axis labels
     x = list(range(len(dates)))
 
     plt.figure()
     plt.plot(x, values, marker="o")
 
-    plt.title("NorthStar Portfolio Equity Curve")
-    plt.xlabel("Time (snapshots)")
+    plt.title("NorthStar Equity Curve")
+    plt.xlabel("Time")
     plt.ylabel("Portfolio Value ($)")
 
     plt.xticks(x, [d[5:16].replace("T", " ") for d in dates], rotation=45)
@@ -164,6 +148,63 @@ def generate_chart(history):
     plt.savefig(CHART_FILE)
 
     print(f"\nChart saved → {CHART_FILE}")
+
+# -----------------------------
+# 📊 PORTFOLIO INTELLIGENCE LAYER (NEW)
+# -----------------------------
+def portfolio_intelligence(analysis, holdings):
+    total_value = analysis["total_value"]
+
+    # diversification
+    num_holdings = len(holdings)
+    largest_weight = max(analysis["allocation_pct"].values())
+
+    diversification_score = max(0, 100 - (largest_weight - 20))  # simple heuristic
+
+    # dividend income
+    annual_income = analysis["annual_dividend_income"]
+    monthly_income = annual_income / 12
+
+    return {
+        "num_holdings": num_holdings,
+        "largest_position_pct": largest_weight,
+        "diversification_score": diversification_score,
+        "annual_income": annual_income,
+        "monthly_income": monthly_income
+    }
+
+# -----------------------------
+# REPORT
+# -----------------------------
+def generate_report(analysis, performance=None, intel=None):
+    print("\nNORTHSTAR REPORT (v0.5)")
+    print("-" * 50)
+
+    print(f"Total Portfolio Value: ${analysis['total_value']:.2f}")
+    print(f"Estimated Dividend Yield: {analysis['portfolio_yield'] * 100:.2f}%")
+
+    print("\nAllocation Breakdown:")
+    for ticker, pct in analysis["allocation_pct"].items():
+        print(f"  {ticker}: {pct:.2f}%")
+
+    print("\n💰 Income Projection:")
+    print(f"  Annual Dividend Income: ${analysis['annual_dividend_income']:.2f}")
+
+    if intel:
+        print("\n📊 Portfolio Intelligence:")
+        print(f"  Holdings: {intel['num_holdings']}")
+        print(f"  Largest Position: {intel['largest_position_pct']:.2f}%")
+        print(f"  Diversification Score: {intel['diversification_score']:.1f}/100")
+        print(f"  Monthly Income: ${intel['monthly_income']:.2f}")
+
+    if performance:
+        print("\n📈 Performance:")
+        print(f"  Start: ${performance['start']:.2f}")
+        print(f"  Current: ${performance['current']:.2f}")
+        print(f"  Return: {performance['return_pct']:.2f}%")
+        print(f"  Trend: {performance['trend']}")
+
+    print("-" * 50)
 
 # -----------------------------
 # MAIN
@@ -178,7 +219,9 @@ def main():
     history = load_history()
     performance = compute_performance(history)
 
-    generate_report(analysis, performance)
+    intel = portfolio_intelligence(analysis, holdings)
+
+    generate_report(analysis, performance, intel)
     generate_chart(history)
 
     print("\nSnapshot saved ✔")
