@@ -1,82 +1,73 @@
+import sys
+from pathlib import Path
+
+# =========================================================
+# STREAMLIT IMPORT FIX
+# =========================================================
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 import streamlit as st
+import pandas as pd
 
-from core.parser import load_schwab_csv
-from core.pricing import update_market_values, portfolio_value
-from core.dividends import enrich_income
+from core.portfolio import load_portfolio
 
-st.set_page_config(page_title="Portfolio", layout="wide")
+# =========================================================
+# PAGE SETUP
+# =========================================================
 
-st.title("📈 Portfolio Overview")
+st.set_page_config(page_title="NorthStar Portfolio", layout="wide")
+st.title("📊 Portfolio Overview")
 
+# =========================================================
+# LOAD DATA (NO DIRECT DIVIDEND CALLS HERE)
+# =========================================================
 
-# -----------------------------
-# LOAD DATA
-# -----------------------------
-@st.cache_data
-def load_data():
-    holdings = load_schwab_csv("data/schwab.csv")
-    holdings = update_market_values(holdings)
-    holdings, total_income = enrich_income(holdings)
-    return holdings, total_income
+holdings = load_portfolio()
 
+if not holdings:
+    st.warning("No holdings found.")
+    st.stop()
 
-holdings, total_income = load_data()
+df = pd.DataFrame(holdings)
 
-total_value = portfolio_value(holdings)
-monthly_income = total_income / 12
+# =========================================================
+# METRICS
+# =========================================================
 
+total_value = df["value"].sum()
+total_income = df["annual_income"].sum()
+yield_pct = (total_income / total_value) * 100 if total_value else 0
 
-# -----------------------------
-# SUMMARY CARDS
-# -----------------------------
 col1, col2, col3 = st.columns(3)
 
-with col1:
-    st.metric("Portfolio Value", f"${total_value:,.2f}")
-
-with col2:
-    st.metric("Annual Income", f"${total_income:,.2f}")
-
-with col3:
-    st.metric("Monthly Income", f"${monthly_income:,.2f}")
-
+col1.metric("Portfolio Value", f"${total_value:,.2f}")
+col2.metric("Annual Income", f"${total_income:,.2f}")
+col3.metric("Yield", f"{yield_pct:.2f}%")
 
 st.divider()
 
-
-# -----------------------------
+# =========================================================
 # HOLDINGS TABLE
-# -----------------------------
+# =========================================================
+
 st.subheader("Holdings")
 
-display_data = []
-
-for h in holdings:
-    display_data.append({
-        "Ticker": h["ticker"],
-        "Shares": h["shares"],
-        "Price": h["live_price"],
-        "Value": h["live_value"],
-        "Yield": f"{h['yield']*100:.2f}%",
-        "Annual Income": h["annual_income"],
-    })
-
-st.dataframe(display_data, use_container_width=True)
-
+st.dataframe(
+    df.sort_values("value", ascending=False),
+    use_container_width=True
+)
 
 st.divider()
 
+# =========================================================
+# ALLOCATION
+# =========================================================
 
-# -----------------------------
-# TOP HOLDINGS
-# -----------------------------
-st.subheader("Top Income Holdings")
+st.subheader("Asset Allocation")
 
-top = sorted(holdings, key=lambda x: x["annual_income"], reverse=True)[:10]
+alloc = df.groupby("asset_type")["value"].sum().reset_index()
+alloc["percent"] = alloc["value"] / alloc["value"].sum() * 100
 
-for h in top:
-    st.write(
-        f"**{h['ticker']}** — "
-        f"${h['annual_income']:,.2f} annual income "
-        f"({h['yield']*100:.2f}%)"
-    )
+st.bar_chart(alloc.set_index("asset_type")["value"])
+
+st.dataframe(alloc, use_container_width=True)
