@@ -1,7 +1,10 @@
 from pathlib import Path
 import re
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
+
+import yfinance as yf
+
 
 # =========================================================
 # CLEAN UTIL
@@ -9,13 +12,13 @@ from tkinter import ttk
 
 def clean_text(x):
     x = str(x)
-    x = re.sub(r'\s+', '', x)
-    x = re.sub(r'[^\x21-\x7E]', '', x)
+    x = re.sub(r"\s+", "", x)
+    x = re.sub(r"[^\x21-\x7E]", "", x)
     return x.upper()
 
 
 # =========================================================
-# SCHWAB PARSER
+# SCHWAB PARSER (STATIC BASE HOLDINGS)
 # =========================================================
 
 def load_schwab(file_path="schwab.csv"):
@@ -47,11 +50,6 @@ def load_schwab(file_path="schwab.csv"):
     i_qty = col("Qty")
     i_asset = col("Asset Type")
 
-    def extract_value(line):
-        vals = re.findall(r"\$?[\d,]+\.\d{2}", line)
-        nums = [float(v.replace("$", "").replace(",", "")) for v in vals]
-        return max(nums) if nums else 0.0
-
     holdings = []
 
     for line in lines[header_index + 1:]:
@@ -67,13 +65,11 @@ def load_schwab(file_path="schwab.csv"):
             if qty <= 0:
                 continue
 
-            value = extract_value(line)
             asset = clean_text(parts[i_asset]) if i_asset else "EQUITY"
 
             holdings.append({
                 "ticker": ticker,
                 "shares": qty,
-                "value": value,
                 "asset": asset
             })
 
@@ -81,6 +77,20 @@ def load_schwab(file_path="schwab.csv"):
             continue
 
     return holdings
+
+
+# =========================================================
+# LIVE PRICE ENGINE
+# =========================================================
+
+def get_price(ticker):
+    try:
+        data = yf.Ticker(ticker).history(period="1d")
+        if data.empty:
+            return 0.0
+        return float(data["Close"].iloc[-1])
+    except:
+        return 0.0
 
 
 # =========================================================
@@ -112,23 +122,32 @@ DEFAULT_YIELD = 0.02
 
 
 # =========================================================
-# CALC ENGINE
+# ANALYTICS ENGINE
 # =========================================================
 
 def calculate(holdings):
     total_value = 0
     total_income = 0
 
+    enriched = []
+
     for h in holdings:
-        t = h["ticker"]
-        v = float(h["value"])
+        ticker = h["ticker"]
+        shares = h["shares"]
 
-        total_value += v
-        y = YIELD.get(t, DEFAULT_YIELD)
+        price = get_price(ticker)
+        value = shares * price
 
-        total_income += v * y
+        y = YIELD.get(ticker, DEFAULT_YIELD)
 
-    return total_value, total_income
+        income = value * y
+
+        total_value += value
+        total_income += income
+
+        enriched.append((ticker, shares, price, value, income))
+
+    return total_value, total_income, enriched
 
 
 # =========================================================
@@ -138,65 +157,73 @@ def calculate(holdings):
 class NorthStarApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("NorthStar Portfolio Engine v2.0")
-        self.root.geometry("900x600")
+        self.root.title("NorthStar v2.1 — Live Portfolio Engine")
+        self.root.geometry("1000x650")
 
         self.holdings = load_schwab("schwab.csv")
-        self.total_value, self.income = calculate(self.holdings)
 
-        # ================= TOP METRICS =================
-        self.frame_top = tk.Frame(root)
-        self.frame_top.pack(pady=10)
+        self.total_value = 0
+        self.total_income = 0
+        self.enriched = []
 
-        self.lbl_value = tk.Label(self.frame_top, text="", font=("Arial", 14))
-        self.lbl_value.pack()
+        # TOP METRICS
+        self.lbl = tk.Label(root, text="", font=("Arial", 14))
+        self.lbl.pack(pady=10)
 
-        self.lbl_income = tk.Label(self.frame_top, text="", font=("Arial", 14))
-        self.lbl_income.pack()
+        # BUTTONS
+        frame = tk.Frame(root)
+        frame.pack()
 
-        # ================= BUTTONS =================
-        self.frame_btn = tk.Frame(root)
-        self.frame_btn.pack(pady=10)
+        tk.Button(frame, text="Refresh Prices", command=self.refresh).pack(side=tk.LEFT, padx=5)
+        tk.Button(frame, text="Top Income", command=self.top_income).pack(side=tk.LEFT, padx=5)
 
-        tk.Button(self.frame_btn, text="Refresh", command=self.refresh).pack(side=tk.LEFT, padx=5)
-        tk.Button(self.frame_btn, text="Show Top Income", command=self.show_top).pack(side=tk.LEFT, padx=5)
+        # TABLE
+        self.tree = ttk.Treeview(
+            root,
+            columns=("ticker", "shares", "price", "value", "income"),
+            show="headings"
+        )
 
-        # ================= TABLE =================
-        self.tree = ttk.Treeview(root, columns=("ticker", "shares", "value"), show="headings")
-        self.tree.heading("ticker", text="Ticker")
-        self.tree.heading("shares", text="Shares")
-        self.tree.heading("value", text="Value")
+        for col in ("ticker", "shares", "price", "value", "income"):
+            self.tree.heading(col, text=col.upper())
+
         self.tree.pack(fill="both", expand=True)
 
         self.refresh()
 
     def refresh(self):
-        self.holdings = load_schwab("schwab.csv")
-        self.total_value, self.income = calculate(self.holdings)
+        try:
+            self.total_value, self.total_income, self.enriched = calculate(self.holdings)
 
-        self.lbl_value.config(text=f"Portfolio Value: ${self.total_value:,.2f}")
-        self.lbl_income.config(text=f"Annual Income: ${self.income:,.2f}  |  Monthly: ${self.income/12:,.2f}")
+            self.lbl.config(
+                text=f"Value: ${self.total_value:,.2f}   |   Income: ${self.total_income:,.2f}   |   Monthly: ${self.total_income/12:,.2f}"
+            )
 
-        for row in self.tree.get_children():
-            self.tree.delete(row)
+            self.tree.delete(*self.tree.get_children())
 
-        for h in self.holdings:
-            self.tree.insert("", "end", values=(h["ticker"], h["shares"], f"${h['value']:,.2f}"))
+            for t, s, p, v, i in self.enriched:
+                self.tree.insert("", "end", values=(
+                    t,
+                    s,
+                    f"${p:,.2f}",
+                    f"${v:,.2f}",
+                    f"${i:,.2f}"
+                ))
 
-    def show_top(self):
-        top = sorted(self.holdings, key=lambda x: x["value"], reverse=True)[:10]
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def top_income(self):
+        top = sorted(self.enriched, key=lambda x: x[4], reverse=True)[:10]
 
         popup = tk.Toplevel(self.root)
-        popup.title("Top Holdings")
+        popup.title("Top Income Contributors")
 
-        text = tk.Text(popup, width=60, height=20)
+        text = tk.Text(popup, width=70, height=25)
         text.pack()
 
-        for h in top:
-            t = h["ticker"]
-            v = h["value"]
-            y = YIELD.get(t, DEFAULT_YIELD)
-            text.insert("end", f"{t}: ${v:,.2f} → Income ${v*y:,.2f}\n")
+        for t, s, p, v, i in top:
+            text.insert("end", f"{t}: value ${v:,.2f} → income ${i:,.2f}\n")
 
 
 # =========================================================
