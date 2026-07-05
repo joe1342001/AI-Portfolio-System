@@ -3,6 +3,9 @@ import pandas as pd
 import re
 from pathlib import Path
 
+DATA_FILE = Path("data/schwab.csv")
+
+holdings = parse_schwab_csv(str(DATA_FILE))
 from database.database import (
     initialize_database,
     save_snapshot,
