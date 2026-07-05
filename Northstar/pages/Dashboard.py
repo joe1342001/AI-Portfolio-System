@@ -28,15 +28,6 @@ if not holdings:
 df = pd.DataFrame(holdings)
 
 # =========================================================
-# CORE METRICS
-# =========================================================
-
-total_value = df["value"].sum()
-annual_income = df["annual_income"].sum()
-monthly_income = annual_income / 12
-yield_pct = (annual_income / total_value) * 100 if total_value else 0
-
-# =========================================================
 # HEADER METRICS
 # =========================================================
 
