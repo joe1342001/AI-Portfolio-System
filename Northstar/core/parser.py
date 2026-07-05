@@ -1,34 +1,81 @@
 from pathlib import Path
 
-
 # =========================================================
-# PATH RESOLUTION (FIXES STREAMLIT CLOUD ISSUES)
+# PATH RESOLUTION (STREAMLIT SAFE)
 # =========================================================
 
 def get_base_path():
-    """
-    Always resolves project root correctly whether:
-    - running locally
-    - running in Streamlit Cloud
-    - running from submodule pages
-    """
     return Path(__file__).resolve().parent.parent
 
 
 # =========================================================
-# MAIN LOADER
+# YIELD ENGINE (REALISTIC MODEL)
+# =========================================================
+
+TICKER_YIELD = {
+    # High yield REITs / BDCs
+    "AGNC": 0.13,
+    "ARCC": 0.10,
+    "NLY": 0.11,
+    "O": 0.05,
+
+    # Covered call / income ETFs
+    "JEPI": 0.07,
+    "JEPQ": 0.09,
+    "QYLD": 0.11,
+    "XYLD": 0.10,
+    "SPYI": 0.10,
+    "QQQI": 0.10,
+    "FEPI": 0.12,
+
+    # Dividend ETFs
+    "SCHD": 0.03,
+    "VYM": 0.03,
+    "HDV": 0.03,
+
+    # International ETFs
+    "VGK": 0.03,
+    "VWO": 0.03,
+
+    # Cash / MMF
+    "SWVXX": 0.045,
+}
+
+
+def get_yield_rate(ticker, asset_type):
+    ticker = ticker.upper().strip()
+
+    # 1. Exact ticker match (highest priority)
+    if ticker in TICKER_YIELD:
+        return TICKER_YIELD[ticker]
+
+    # 2. Asset-type fallback
+    asset_type = (asset_type or "").lower()
+
+    if "cash" in asset_type or "money" in asset_type:
+        return 0.045
+
+    if "reit" in asset_type:
+        return 0.10
+
+    if "etf" in asset_type or "closed" in asset_type:
+        return 0.04
+
+    # 3. Default equity yield (S&P-like)
+    return 0.015
+
+
+# =========================================================
+# MAIN CSV LOADER
 # =========================================================
 
 def load_schwab_csv(file_path="data/schwab.csv"):
-    """
-    Loads Schwab export CSV into structured holdings list.
-    """
 
     base_path = get_base_path()
     full_path = base_path / file_path
 
     if not full_path.exists():
-        raise FileNotFoundError(f"Cannot find file at: {full_path}")
+        raise FileNotFoundError(f"Cannot find file: {full_path}")
 
     lines = full_path.read_text(encoding="utf-8-sig", errors="ignore").splitlines()
 
@@ -65,7 +112,7 @@ def load_schwab_csv(file_path="data/schwab.csv"):
     i_asset = col("Asset Type")
 
     if i_symbol is None or i_qty is None:
-        raise ValueError("Missing required Schwab columns (Symbol or Qty)")
+        raise ValueError("Missing required Schwab columns")
 
     # =========================================================
     # PARSE ROWS
@@ -83,7 +130,7 @@ def load_schwab_csv(file_path="data/schwab.csv"):
         try:
             ticker = parts[i_symbol].strip()
 
-            # skip totals / empty rows
+            # skip junk rows
             if not ticker or "Total" in ticker:
                 continue
 
@@ -102,9 +149,11 @@ def load_schwab_csv(file_path="data/schwab.csv"):
             asset_type = parts[i_asset] if i_asset and i_asset < len(parts) else "Equity"
 
             # =====================================================
-            # INCOME MODEL (Schwab does NOT provide yield data)
+            # REAL INCOME MODEL
             # =====================================================
-            annual_income = value * 0.05
+
+            yield_rate = get_yield_rate(ticker, asset_type)
+            annual_income = value * yield_rate
 
             holdings.append({
                 "ticker": ticker,
@@ -112,7 +161,8 @@ def load_schwab_csv(file_path="data/schwab.csv"):
                 "price": price,
                 "value": value,
                 "annual_income": annual_income,
-                "asset_type": asset_type
+                "asset_type": asset_type,
+                "yield": yield_rate
             })
 
         except Exception:
@@ -122,7 +172,7 @@ def load_schwab_csv(file_path="data/schwab.csv"):
 
 
 # =========================================================
-# OPTIONAL DEBUG FUNCTION
+# DEBUG HELPER
 # =========================================================
 
 def debug_path(file_path="data/schwab.csv"):
