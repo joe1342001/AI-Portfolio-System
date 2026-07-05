@@ -23,8 +23,12 @@ st.title("⭐ NorthStar Dashboard")
 # LOAD DATA (SINGLE SOURCE OF TRUTH)
 # =========================================================
 
-holdings = load_portfolio()
-
+try:
+    holdings = load_portfolio()
+except Exception as e:
+    st.error("LOAD PORTFOLIO FAILED")
+    st.exception(e)
+    st.stop()
 if not holdings:
     st.warning("No holdings found.")
     st.stop()
