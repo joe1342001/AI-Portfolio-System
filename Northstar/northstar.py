@@ -96,18 +96,6 @@ def create_snapshot(analysis):
         "yield": analysis["portfolio_yield"]
     }
 
-def main():
-    holdings = load_portfolio("data.json")
-    analysis = analyze_portfolio(holdings)
-
-    generate_report(analysis)
-
-    # NEW: create and save snapshot
-    snapshot = create_snapshot(analysis)
-    save_history(snapshot)
-
-    print("\nSnapshot saved to history ✔")
-
 def save_history(entry):
     history = load_history()
     history.append(entry)
@@ -121,8 +109,11 @@ def save_history(entry):
 def main():
     holdings = load_portfolio("data.json")
     analysis = analyze_portfolio(holdings)
+
     generate_report(analysis)
 
+    # history tracking
+    snapshot = create_snapshot(analysis)
+    save_history(snapshot)
 
-if __name__ == "__main__":
-    main()
+    print("\nSnapshot saved to history ✔")
