@@ -19,7 +19,10 @@ st.title("⭐ NorthStar v4.1 — Stable Edition")
 
 initialize_database()
 
-DATA_FILE = Path("data/schwab.csv")
+import os
+
+BASE_DIR = Path(__file__).resolve().parent
+DATA_FILE = BASE_DIR / "data" / "schwab.csv"
 
 # =========================================================
 # SCHWAB PARSER (EMBEDDED - NO DEPENDENCIES)
