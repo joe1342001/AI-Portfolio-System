@@ -1,209 +1,213 @@
-import json
-import csv
-import datetime
 from pathlib import Path
-import yfinance as yf
+import re
+import tkinter as tk
+from tkinter import ttk
 
-# -----------------------------
-# CONFIG
-# -----------------------------
-HISTORY_FILE = "northstar_history.json"
-SCHWAB_FILE = "schwab.csv"
+# =========================================================
+# CLEAN UTIL
+# =========================================================
 
-# -----------------------------
-# PRICE ENGINE (live, optional)
-# -----------------------------
-def get_price(ticker):
-    try:
-        stock = yf.Ticker(ticker)
+def clean_text(x):
+    x = str(x)
+    x = re.sub(r'\s+', '', x)
+    x = re.sub(r'[^\x21-\x7E]', '', x)
+    return x.upper()
 
-        price = None
 
-        if hasattr(stock, "fast_info"):
-            price = stock.fast_info.get("lastPrice")
+# =========================================================
+# SCHWAB PARSER
+# =========================================================
 
-        if price is None:
-            hist = stock.history(period="5d")
-            if not hist.empty:
-                price = hist["Close"].iloc[-1]
-
-        return float(price) if price else 0.0
-
-    except Exception:
-        return 0.0
-
-# -----------------------------
-# SCHWAB CSV IMPORT (CORE)
-# -----------------------------
-def import_schwab(csv_file):
-    path = Path(csv_file)
+def load_schwab(file_path="schwab.csv"):
+    path = Path(file_path)
 
     if not path.exists():
-        print(f"❌ Schwab file not found: {csv_file}")
         return []
+
+    lines = path.read_text(encoding="utf-8-sig", errors="ignore").splitlines()
+
+    header_index = None
+    for i, line in enumerate(lines):
+        if '"Symbol"' in line and '"Qty' in line:
+            header_index = i
+            break
+
+    if header_index is None:
+        return []
+
+    headers = [h.strip().strip('"') for h in lines[header_index].split('","')]
+
+    def col(name):
+        for i, h in enumerate(headers):
+            if name.lower() in h.lower():
+                return i
+        return None
+
+    i_symbol = col("Symbol")
+    i_qty = col("Qty")
+    i_asset = col("Asset Type")
+
+    def extract_value(line):
+        vals = re.findall(r"\$?[\d,]+\.\d{2}", line)
+        nums = [float(v.replace("$", "").replace(",", "")) for v in vals]
+        return max(nums) if nums else 0.0
 
     holdings = []
 
-    with open(path, "r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
+    for line in lines[header_index + 1:]:
+        if not line.startswith('"'):
+            continue
 
-        if not reader.fieldnames:
-            print("❌ Invalid CSV format")
-            return []
+        parts = [p.strip().strip('"') for p in line.split('","')]
 
-        def find(col_options):
-            for c in reader.fieldnames:
-                for opt in col_options:
-                    if opt.lower() in c.lower():
-                        return c
-            return None
+        try:
+            ticker = clean_text(parts[i_symbol])
+            qty = float(parts[i_qty].replace(",", ""))
 
-        symbol_col = find(["symbol", "ticker"])
-        qty_col = find(["quantity", "shares", "qty"])
-        cost_col = find(["cost", "cost basis"])
-
-        if not symbol_col or not qty_col:
-            print("❌ Could not detect required Schwab columns")
-            print("Found:", reader.fieldnames)
-            return []
-
-        for row in reader:
-            try:
-                ticker = row[symbol_col].strip().upper()
-                shares = float(row[qty_col])
-
-                if not ticker or shares <= 0:
-                    continue
-
-                cost = None
-                if cost_col and row.get(cost_col):
-                    try:
-                        cost = float(row[cost_col])
-                    except:
-                        cost = None
-
-                holdings.append({
-                    "ticker": ticker,
-                    "shares": shares,
-                    "cost_basis": cost
-                })
-
-            except Exception:
+            if qty <= 0:
                 continue
+
+            value = extract_value(line)
+            asset = clean_text(parts[i_asset]) if i_asset else "EQUITY"
+
+            holdings.append({
+                "ticker": ticker,
+                "shares": qty,
+                "value": value,
+                "asset": asset
+            })
+
+        except:
+            continue
 
     return holdings
 
-# -----------------------------
-# ANALYSIS ENGINE (BROKER-BASED)
-# -----------------------------
-def analyze(holdings):
+
+# =========================================================
+# YIELD MODEL
+# =========================================================
+
+YIELD = {
+    "JEPI": 0.07,
+    "JEPQ": 0.09,
+    "QYLD": 0.11,
+    "QQQI": 0.10,
+    "SPYI": 0.10,
+    "FEPI": 0.12,
+    "YYY": 0.12,
+    "AGNC": 0.13,
+    "NLY": 0.11,
+    "ARCC": 0.10,
+    "MPLX": 0.08,
+    "EPD": 0.07,
+    "SWVXX": 0.045,
+    "HDV": 0.03,
+    "SCHD": 0.03,
+    "VGK": 0.03,
+    "VWO": 0.03,
+    "QQQ": 0.015
+}
+
+DEFAULT_YIELD = 0.02
+
+
+# =========================================================
+# CALC ENGINE
+# =========================================================
+
+def calculate(holdings):
     total_value = 0
-    total_cost = 0
-    enriched = []
-    allocation = {}
+    total_income = 0
 
     for h in holdings:
-        ticker = h["ticker"]
-        shares = h["shares"]
+        t = h["ticker"]
+        v = float(h["value"])
 
-        price = get_price(ticker)
-        value = price * shares
+        total_value += v
+        y = YIELD.get(t, DEFAULT_YIELD)
 
-        cost = h.get("cost_basis")
-        if cost:
-            total_cost += cost
+        total_income += v * y
 
-        total_value += value
-        allocation[ticker] = value
+    return total_value, total_income
 
-        enriched.append({
-            **h,
-            "price": price,
-            "value": value
-        })
 
-    allocation_pct = {
-        k: (v / total_value) * 100 if total_value > 0 else 0
-        for k, v in allocation.items()
-    }
+# =========================================================
+# GUI APP
+# =========================================================
 
-    return {
-        "total_value": total_value,
-        "total_cost": total_cost,
-        "holdings": enriched,
-        "allocation": allocation_pct
-    }
+class NorthStarApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("NorthStar Portfolio Engine v2.0")
+        self.root.geometry("900x600")
 
-# -----------------------------
-# PERFORMANCE (REAL RETURN IF COST AVAILABLE)
-# -----------------------------
-def performance(data):
-    if data["total_cost"] > 0:
-        return ((data["total_value"] - data["total_cost"]) / data["total_cost"]) * 100
-    return None
+        self.holdings = load_schwab("schwab.csv")
+        self.total_value, self.income = calculate(self.holdings)
 
-# -----------------------------
-# SIMPLE INTELLIGENCE
-# -----------------------------
-def intelligence(data, perf):
-    largest = max(data["allocation"].values()) if data["allocation"] else 0
+        # ================= TOP METRICS =================
+        self.frame_top = tk.Frame(root)
+        self.frame_top.pack(pady=10)
 
-    return {
-        "holdings": len(data["holdings"]),
-        "largest_pct": largest,
-        "return_pct": perf
-    }
+        self.lbl_value = tk.Label(self.frame_top, text="", font=("Arial", 14))
+        self.lbl_value.pack()
 
-# -----------------------------
-# CHAT ENGINE
-# -----------------------------
-def ask(q, data, intel):
-    q = q.lower()
+        self.lbl_income = tk.Label(self.frame_top, text="", font=("Arial", 14))
+        self.lbl_income.pack()
 
-    if "value" in q or "worth" in q:
-        return f"Portfolio value: ${data['total_value']:.2f}"
+        # ================= BUTTONS =================
+        self.frame_btn = tk.Frame(root)
+        self.frame_btn.pack(pady=10)
 
-    if "return" in q or "performance" in q:
-        if intel["return_pct"] is not None:
-            return f"Total return: {intel['return_pct']:.2f}%"
-        return "Return unavailable (missing cost basis)."
+        tk.Button(self.frame_btn, text="Refresh", command=self.refresh).pack(side=tk.LEFT, padx=5)
+        tk.Button(self.frame_btn, text="Show Top Income", command=self.show_top).pack(side=tk.LEFT, padx=5)
 
-    if "holdings" in q:
-        return "Holdings: " + ", ".join([h["ticker"] for h in data["holdings"]])
+        # ================= TABLE =================
+        self.tree = ttk.Treeview(root, columns=("ticker", "shares", "value"), show="headings")
+        self.tree.heading("ticker", text="Ticker")
+        self.tree.heading("shares", text="Shares")
+        self.tree.heading("value", text="Value")
+        self.tree.pack(fill="both", expand=True)
 
-    if "risk" in q:
-        if intel["largest_pct"] > 40:
-            return "High concentration risk detected."
-        return "Diversification looks reasonable."
+        self.refresh()
 
-    return "Ask: value, return, holdings, risk."
+    def refresh(self):
+        self.holdings = load_schwab("schwab.csv")
+        self.total_value, self.income = calculate(self.holdings)
 
-# -----------------------------
+        self.lbl_value.config(text=f"Portfolio Value: ${self.total_value:,.2f}")
+        self.lbl_income.config(text=f"Annual Income: ${self.income:,.2f}  |  Monthly: ${self.income/12:,.2f}")
+
+        for row in self.tree.get_children():
+            self.tree.delete(row)
+
+        for h in self.holdings:
+            self.tree.insert("", "end", values=(h["ticker"], h["shares"], f"${h['value']:,.2f}"))
+
+    def show_top(self):
+        top = sorted(self.holdings, key=lambda x: x["value"], reverse=True)[:10]
+
+        popup = tk.Toplevel(self.root)
+        popup.title("Top Holdings")
+
+        text = tk.Text(popup, width=60, height=20)
+        text.pack()
+
+        for h in top:
+            t = h["ticker"]
+            v = h["value"]
+            y = YIELD.get(t, DEFAULT_YIELD)
+            text.insert("end", f"{t}: ${v:,.2f} → Income ${v*y:,.2f}\n")
+
+
+# =========================================================
 # MAIN
-# -----------------------------
+# =========================================================
+
 def main():
-    holdings = import_schwab(SCHWAB_FILE)
+    root = tk.Tk()
+    app = NorthStarApp(root)
+    root.mainloop()
 
-    if not holdings:
-        print("No holdings loaded.")
-        return
 
-    data = analyze(holdings)
-    perf = performance(data)
-    intel = intelligence(data, perf)
-
-    print("\nNORTHSTAR v1.0 (BROKER-GRADE MODE)")
-    print("Type 'exit' to quit\n")
-
-    while True:
-        q = input("You: ")
-        if q.lower() in ["exit", "quit"]:
-            break
-
-        print("NorthStar:", ask(q, data, intel))
-
-# -----------------------------
-# RUN
-# -----------------------------
 if __name__ == "__main__":
     main()
