@@ -1,134 +1,82 @@
-import json
+import csv
 from pathlib import Path
+from io import StringIO
 
-# -----------------------------
-# LOAD SCHWAB DATA (already parsed CSV → JSON-like list)
-# -----------------------------
-def load_portfolio(file_path="data.json"):
-    path = Path(file_path)
+def load_schwab(csv_file):
+    path = Path(csv_file)
 
     if not path.exists():
-        print("❌ data.json not found")
+        print("❌ File not found:", csv_file)
         return []
 
-    return json.load(open(path))["portfolio"]
+    raw = path.read_text(encoding="utf-8-sig", errors="ignore").splitlines()
 
-# -----------------------------
-# INCOME MODEL (BROKER-REALISTIC)
-# -----------------------------
+    # -----------------------------
+    # FIND REAL HEADER ROW
+    # -----------------------------
+    header_index = None
 
-# conservative yield assumptions (based on typical Schwab holdings)
-YIELD_MAP = {
-    "REIT": 0.08,
-    "ETFs & Closed End Funds": 0.10,
-    "Equity": 0.02,
-    "Cash and Money Market": 0.045
-}
+    for i, line in enumerate(raw):
+        line_lower = line.lower()
 
-# ticker-specific overrides (important for your portfolio)
-TICKER_YIELD_OVERRIDE = {
-    "AGNC": 0.13,
-    "ARCC": 0.10,
-    "NLY": 0.11,
-    "MPLX": 0.08,
-    "EPD": 0.07,
-    "JEPI": 0.07,
-    "JEPQ": 0.09,
-    "QYLD": 0.11,
-    "QQQI": 0.10,
-    "SPYI": 0.10,
-    "FEPI": 0.12,
-    "YYY": 0.12,
-    "DIVO": 0.04,
-    "HDV": 0.03,
-    "VGK": 0.03,
-    "VWO": 0.03,
-    "SCHD": 0.03,
-    "SWVXX": 0.045
-}
+        if "symbol" in line_lower and "qty" in line_lower:
+            header_index = i
+            break
 
-# -----------------------------
-# ANALYZE PORTFOLIO
-# -----------------------------
-def analyze(holdings):
-    total_value = 0
-    total_income = 0
-    breakdown = []
+        if "symbol" in line_lower and "quantity" in line_lower:
+            header_index = i
+            break
 
-    for h in holdings:
-        ticker = h["ticker"]
-        value = float(h.get("value", 0))
-        asset_type = h.get("asset_type", "Equity")
+    if header_index is None:
+        print("❌ Could not locate Schwab data table in file.")
+        print("First line preview:", raw[0])
+        return []
 
-        # determine yield
-        if ticker in TICKER_YIELD_OVERRIDE:
-            yield_rate = TICKER_YIELD_OVERRIDE[ticker]
-        else:
-            yield_rate = YIELD_MAP.get(asset_type, 0.02)
+    clean_data = "\n".join(raw[header_index:])
 
-        income = value * yield_rate
+    reader = csv.DictReader(StringIO(clean_data))
 
-        total_value += value
-        total_income += income
+    holdings = []
 
-        breakdown.append({
-            "ticker": ticker,
-            "value": value,
-            "yield": yield_rate,
-            "income": income
-        })
+    for row in reader:
+        try:
+            ticker = None
+            shares = None
+            value = None
+            asset_type = None
 
-    return {
-        "total_value": total_value,
-        "annual_income": total_income,
-        "monthly_income": total_income / 12,
-        "breakdown": breakdown
-    }
+            for k, v in row.items():
+                lk = k.lower()
 
-# -----------------------------
-# SIMPLE REPORT
-# -----------------------------
-def report(data):
-    print("\nNORTHSTAR v1.0 (SCHWAB REAL INCOME MODEL)")
-    print("-" * 50)
-    print(f"Portfolio Value: ${data['total_value']:,.2f}")
-    print(f"Annual Income:    ${data['annual_income']:,.2f}")
-    print(f"Monthly Income:   ${data['monthly_income']:,.2f}")
-    print("-" * 50)
+                if "symbol" in lk:
+                    ticker = v
 
-    top = sorted(data["breakdown"], key=lambda x: x["income"], reverse=True)[:5]
+                if "qty" in lk or "quantity" in lk:
+                    shares = v
 
-    print("\nTop Income Contributors:")
-    for t in top:
-        print(f"{t['ticker']}: ${t['income']:.2f} (yield {t['yield']*100:.1f}%)")
+                if "market val" in lk:
+                    value = v
 
-# -----------------------------
-# MAIN
-# -----------------------------
-def main():
-    holdings = load_portfolio()
-    if not holdings:
-        return
+                if "asset type" in lk:
+                    asset_type = v
 
-    data = analyze(holdings)
-    report(data)
-
-# -----------------------------
-# RUN
-# -----------------------------
-if __name__ == "__main__":
-    main() if not ticker or not shares:
+            if not ticker or not shares:
                 continue
 
             ticker = ticker.strip().upper()
             shares = float(shares)
 
-            if shares <= 0:
-                continue
+            # clean value (remove $)
+            if value:
+                value = float(value.replace("$", "").replace(",", ""))
+            else:
+                value = 0.0
 
             holdings.append({
                 "ticker": ticker,
-                "shares": shares
+                "shares": shares,
+                "value": value,
+                "asset_type": asset_type or "Equity"
             })
 
         except Exception:
