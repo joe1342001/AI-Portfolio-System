@@ -7,31 +7,17 @@ import yfinance as yf
 # CONFIG
 # -----------------------------
 HISTORY_FILE = "northstar_history.json"
-PRICE_CACHE_FILE = "northstar_price_cache.json"
 
 # -----------------------------
-# PORTFOLIO DATA
+# PORTFOLIO
 # -----------------------------
-PORTFOLIO = {
-  "portfolio": [
-    {
-      "ticker": "AGNC",
-      "shares": 267.9006,
-      "dividend_yield": 0.01313
-    },
-    {
-      "ticker": "AIPI",
-      "shares": 115.0055,
-      "dividend_yield": 0.03483
-    },
-    {
-      "ticker": "ARCC",
-      "shares": 271.3729,
-      "dividend_yield": 0.01027
-    }
-  ]
+SAMPLE_PORTFOLIO = {
+    "portfolio": [
+        {"ticker": "AAPL", "shares": 10},
+        {"ticker": "MSFT", "shares": 8},
+        {"ticker": "SCHD", "shares": 25}
+    ]
 }
-
 
 # -----------------------------
 # LOAD PORTFOLIO
@@ -47,25 +33,47 @@ def load_portfolio(file_path="data.json"):
         return json.load(f)["portfolio"]
 
 # -----------------------------
-# PRICE ENGINE (simplified v0.8)
+# PRICE ENGINE (stable)
 # -----------------------------
 def get_price(ticker):
     try:
         stock = yf.Ticker(ticker)
-        
-        # try fast path
+
+        # primary
         price = None
         if hasattr(stock, "fast_info"):
             price = stock.fast_info.get("lastPrice")
 
-        # fallback path
+        # fallback
         if price is None:
-            price = stock.history(period="1d")["Close"].iloc[-1]
+            hist = stock.history(period="1d")
+            if not hist.empty:
+                price = hist["Close"].iloc[-1]
 
-        return float(price)
+        return float(price) if price is not None else 0.0
 
     except Exception:
-        return None
+        return 0.0
+
+# -----------------------------
+# DIVIDEND YIELD ENGINE (NEW)
+# -----------------------------
+def get_dividend_yield(ticker):
+    try:
+        stock = yf.Ticker(ticker)
+        div = None
+
+        if hasattr(stock, "info"):
+            div = stock.info.get("dividendYield")
+
+        if div is None:
+            return 0.0
+
+        return float(div)
+
+    except Exception:
+        return 0.0
+
 # -----------------------------
 # ANALYSIS
 # -----------------------------
@@ -78,7 +86,13 @@ def analyze(holdings):
         price = get_price(h["ticker"])
         value = price * h["shares"]
 
-        enriched.append({**h, "price": price, "value": value})
+        enriched.append({
+            "ticker": h["ticker"],
+            "shares": h["shares"],
+            "price": price,
+            "value": value,
+            "dividend_yield": get_dividend_yield(h["ticker"])
+        })
 
         total += value
         allocation[h["ticker"]] = value
@@ -98,7 +112,7 @@ def analyze(holdings):
     }
 
 # -----------------------------
-# INTELLIGENCE
+# INTELLIGENCE LAYER
 # -----------------------------
 def intelligence(data):
     largest = max(data["allocation"].values()) if data["allocation"] else 0
@@ -106,17 +120,18 @@ def intelligence(data):
     return {
         "largest_pct": largest,
         "holdings": len(data["holdings"]),
-        "monthly_income": data["income"] / 12
+        "monthly_income": data["income"] / 12,
+        "annual_income": data["income"]
     }
 
 # -----------------------------
 # HISTORY
 # -----------------------------
 def load_history():
-    p = Path(HISTORY_FILE)
-    if not p.exists():
+    path = Path(HISTORY_FILE)
+    if not path.exists():
         return []
-    return json.load(open(p))
+    return json.load(open(path))
 
 def save_history(entry):
     hist = load_history()
@@ -130,7 +145,7 @@ def snapshot(data):
     }
 
 # -----------------------------
-# SIMPLE PERFORMANCE
+# PERFORMANCE
 # -----------------------------
 def performance(hist):
     if len(hist) < 2:
@@ -141,48 +156,49 @@ def performance(hist):
     start = hist[0]["value"]
     end = hist[-1]["value"]
 
-    pct = ((end - start) / start) * 100 if start else 0
+    if start == 0:
+        return None
+
+    pct = ((end - start) / start) * 100
 
     trend = "up" if pct > 1 else "down" if pct < -1 else "flat"
 
-    return {"start": start, "end": end, "pct": pct, "trend": trend}
+    return {
+        "start": start,
+        "end": end,
+        "pct": pct,
+        "trend": trend
+    }
 
 # -----------------------------
-# 🧠 CHAT ENGINE (NEW CORE FEATURE)
+# CHAT ENGINE
 # -----------------------------
-def ask_northstar(question, data, intel, perf):
+def ask(question, data, intel, perf):
     q = question.lower()
 
-    # portfolio value
     if "value" in q or "worth" in q:
-        return f"Your portfolio is worth about ${data['total']:.2f}"
+        return f"Portfolio value: ${data['total']:.2f}"
 
-    # income
     if "income" in q or "dividend" in q:
         return f"Estimated monthly income: ${intel['monthly_income']:.2f}"
 
-    # concentration risk
     if "risk" in q or "divers" in q:
         if intel["largest_pct"] > 40:
-            return "High concentration risk: one holding dominates your portfolio."
-        return "Your portfolio is reasonably diversified."
+            return "High concentration risk detected."
+        return "Diversification looks reasonable."
 
-    # performance
+    if "holdings" in q:
+        return "Holdings: " + ", ".join([h["ticker"] for h in data["holdings"]])
+
     if "performance" in q or "return" in q:
         if perf:
             return f"Return: {perf['pct']:.2f}% ({perf['trend']})"
         return "Not enough history yet."
 
-    # holdings
-    if "holdings" in q or "stocks" in q:
-        names = ", ".join([h["ticker"] for h in data["holdings"]])
-        return f"You hold: {names}"
-
-    # default
-    return "I can help with value, income, risk, performance, or holdings."
+    return "Try asking about value, income, risk, holdings, or performance."
 
 # -----------------------------
-# MAIN LOOP (CHAT MODE)
+# MAIN LOOP
 # -----------------------------
 def main():
     holdings = load_portfolio("data.json")
@@ -194,17 +210,15 @@ def main():
 
     save_history(snapshot(data))
 
-    print("\nNORTHSTAR v0.8 — AI PORTFOLIO ASSISTANT")
-    print("Type a question (or 'exit')\n")
+    print("\nNORTHSTAR v0.8 (CLEAN BUILD)")
+    print("Type 'exit' to quit\n")
 
     while True:
         q = input("You: ")
-
         if q.lower() in ["exit", "quit"]:
             break
 
-        response = ask_northstar(q, data, intel, perf)
-        print("NorthStar:", response)
+        print("NorthStar:", ask(q, data, intel, perf))
 
 # -----------------------------
 # RUN
