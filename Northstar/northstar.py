@@ -2,6 +2,7 @@ import json
 import datetime
 from pathlib import Path
 import matplotlib.pyplot as plt
+import yfinance as yf
 
 # -----------------------------
 # CONFIG
@@ -10,18 +11,18 @@ HISTORY_FILE = "northstar_history.json"
 CHART_FILE = "northstar_chart.png"
 
 # -----------------------------
-# SAMPLE DATA
+# SAMPLE PORTFOLIO (no prices needed anymore)
 # -----------------------------
 SAMPLE_PORTFOLIO = {
     "portfolio": [
-        {"ticker": "AAPL", "shares": 10, "price": 190.25, "dividend_yield": 0.0052},
-        {"ticker": "MSFT", "shares": 8, "price": 410.10, "dividend_yield": 0.0070},
-        {"ticker": "SCHD", "shares": 25, "price": 78.40, "dividend_yield": 0.0340}
+        {"ticker": "AAPL", "shares": 10, "dividend_yield": 0.0052},
+        {"ticker": "MSFT", "shares": 8, "dividend_yield": 0.0070},
+        {"ticker": "SCHD", "shares": 25, "dividend_yield": 0.0340}
     ]
 }
 
 # -----------------------------
-# LOAD
+# LOAD PORTFOLIO
 # -----------------------------
 def load_portfolio(file_path="data.json"):
     path = Path(file_path)
@@ -34,37 +35,59 @@ def load_portfolio(file_path="data.json"):
         return json.load(f)["portfolio"]
 
 # -----------------------------
-# ANALYSIS
+# LIVE PRICE ENGINE (NEW)
+# -----------------------------
+def get_live_price(ticker):
+    try:
+        stock = yf.Ticker(ticker)
+        price = stock.fast_info["lastPrice"]
+        return float(price)
+    except Exception:
+        print(f"⚠️ Price fetch failed for {ticker}, using fallback 0")
+        return 0.0
+
+# -----------------------------
+# ANALYSIS ENGINE (UPDATED)
 # -----------------------------
 def analyze_portfolio(holdings):
     total_value = 0
     allocation = {}
 
+    enriched_holdings = []
+
     for h in holdings:
-        value = h["shares"] * h["price"]
+        price = get_live_price(h["ticker"])
+        value = h["shares"] * price
+
         total_value += value
         allocation[h["ticker"]] = value
 
+        enriched_holdings.append({
+            **h,
+            "price": price,
+            "value": value
+        })
+
     allocation_pct = {
-        k: (v / total_value) * 100
+        k: (v / total_value) * 100 if total_value > 0 else 0
         for k, v in allocation.items()
     }
 
     weighted_yield = 0
     dividend_income = 0
 
-    for h in holdings:
-        value = h["shares"] * h["price"]
-        weight = value / total_value
+    for h in enriched_holdings:
+        weight = h["value"] / total_value if total_value > 0 else 0
 
         weighted_yield += weight * h["dividend_yield"]
-        dividend_income += value * h["dividend_yield"]
+        dividend_income += h["value"] * h["dividend_yield"]
 
     return {
         "total_value": total_value,
         "allocation_pct": allocation_pct,
         "portfolio_yield": weighted_yield,
-        "annual_dividend_income": dividend_income
+        "annual_dividend_income": dividend_income,
+        "holdings": enriched_holdings
     }
 
 # -----------------------------
@@ -93,7 +116,7 @@ def create_snapshot(analysis):
     }
 
 # -----------------------------
-# PERFORMANCE
+# PERFORMANCE ENGINE
 # -----------------------------
 def compute_performance(history):
     if not history:
@@ -108,7 +131,6 @@ def compute_performance(history):
         return None
 
     pct = ((current - start) / start) * 100
-
     trend = "up" if pct > 1 else "down" if pct < -1 else "flat"
 
     return {
@@ -121,48 +143,39 @@ def compute_performance(history):
 # -----------------------------
 # INTELLIGENCE LAYER
 # -----------------------------
-def portfolio_intelligence(analysis, holdings):
-    largest = max(analysis["allocation_pct"].values())
-    num = len(holdings)
+def portfolio_intelligence(analysis):
+    holdings = analysis["holdings"]
+
+    largest = max(analysis["allocation_pct"].values()) if holdings else 0
 
     return {
-        "num_holdings": num,
+        "num_holdings": len(holdings),
         "largest_position_pct": largest,
         "annual_income": analysis["annual_dividend_income"],
         "monthly_income": analysis["annual_dividend_income"] / 12
     }
 
 # -----------------------------
-# 🧠 AI ANALYST ENGINE (NEW)
+# AI INSIGHTS
 # -----------------------------
 def ai_insight(analysis, performance, intel):
     insights = []
 
-    # concentration risk
     if intel["largest_position_pct"] > 40:
-        insights.append("High concentration risk: one position dominates your portfolio.")
-    elif intel["largest_position_pct"] > 25:
-        insights.append("Moderate concentration risk in top holding.")
+        insights.append("High concentration risk in a single asset.")
 
-    # diversification
     if intel["num_holdings"] < 5:
-        insights.append("Low diversification: consider expanding holdings.")
+        insights.append("Portfolio is lightly diversified.")
 
-    # income interpretation
-    if intel["annual_income"] > 0:
-        insights.append(f"Your portfolio generates about ${intel['monthly_income']:.2f}/month in dividend income.")
+    insights.append(
+        f"Estimated income: ${intel['monthly_income']:.2f}/month from dividends."
+    )
 
-    # performance context
     if performance:
-        if performance["pct"] > 10:
-            insights.append("Strong positive performance trend over time.")
+        if performance["pct"] > 5:
+            insights.append("Strong positive trend over time.")
         elif performance["pct"] < -5:
-            insights.append("Portfolio is under negative pressure over the observed period.")
-
-        if performance["trend"] == "up":
-            insights.append("Momentum is currently positive.")
-        elif performance["trend"] == "down":
-            insights.append("Momentum is currently negative.")
+            insights.append("Portfolio under negative pressure.")
 
     return insights
 
@@ -170,15 +183,15 @@ def ai_insight(analysis, performance, intel):
 # REPORT
 # -----------------------------
 def generate_report(analysis, performance=None, intel=None, insights=None):
-    print("\nNORTHSTAR REPORT (v0.6)")
-    print("-" * 55)
+    print("\nNORTHSTAR REPORT (v0.7)")
+    print("-" * 60)
 
     print(f"Total Value: ${analysis['total_value']:.2f}")
     print(f"Dividend Yield: {analysis['portfolio_yield'] * 100:.2f}%")
 
-    print("\nHoldings:")
-    for k, v in analysis["allocation_pct"].items():
-        print(f"  {k}: {v:.2f}%")
+    print("\nHoldings (Live Prices):")
+    for h in analysis["holdings"]:
+        print(f"  {h['ticker']}: {h['shares']} shares @ ${h['price']:.2f} → ${h['value']:.2f}")
 
     print("\nIncome:")
     print(f"  Annual: ${analysis['annual_dividend_income']:.2f}")
@@ -195,11 +208,11 @@ def generate_report(analysis, performance=None, intel=None, insights=None):
         print(f"  Trend: {performance['trend']}")
 
     if insights:
-        print("\n🧠 AI Insights:")
+        print("\nAI Insights:")
         for i in insights:
             print(f"  - {i}")
 
-    print("-" * 55)
+    print("-" * 60)
 
 # -----------------------------
 # MAIN
@@ -213,7 +226,7 @@ def main():
 
     history = load_history()
     performance = compute_performance(history)
-    intel = portfolio_intelligence(analysis, holdings)
+    intel = portfolio_intelligence(analysis)
     insights = ai_insight(analysis, performance, intel)
 
     generate_report(analysis, performance, intel, insights)
