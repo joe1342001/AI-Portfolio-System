@@ -51,10 +51,21 @@ def load_portfolio(file_path="data.json"):
 # -----------------------------
 def get_price(ticker):
     try:
-        return float(yf.Ticker(ticker).fast_info["lastPrice"])
-    except:
-        return 0.0
+        stock = yf.Ticker(ticker)
+        
+        # try fast path
+        price = None
+        if hasattr(stock, "fast_info"):
+            price = stock.fast_info.get("lastPrice")
 
+        # fallback path
+        if price is None:
+            price = stock.history(period="1d")["Close"].iloc[-1]
+
+        return float(price)
+
+    except Exception:
+        return None
 # -----------------------------
 # ANALYSIS
 # -----------------------------
