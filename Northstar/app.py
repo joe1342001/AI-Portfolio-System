@@ -1,11 +1,8 @@
 import streamlit as st
 import pandas as pd
-import re
 from pathlib import Path
+import sqlite3
 
-DATA_FILE = Path("data/schwab.csv")
-
-holdings = parse_schwab_csv(str(DATA_FILE))
 from database.database import (
     initialize_database,
     save_snapshot,
@@ -18,24 +15,25 @@ from database.database import (
 # =========================================================
 
 st.set_page_config(page_title="NorthStar", layout="wide")
-st.title("⭐ NorthStar v4.0 — Live Portfolio")
+st.title("⭐ NorthStar v4.1 — Stable Edition")
 
 initialize_database()
 
+DATA_FILE = Path("data/schwab.csv")
+
 # =========================================================
-# SCHWAB CSV PARSER (REAL FORMAT)
+# SCHWAB PARSER (EMBEDDED - NO DEPENDENCIES)
 # =========================================================
 
-def parse_schwab_csv(file_path="schwab.csv"):
+def parse_schwab_csv(file_path):
     path = Path(file_path)
 
     if not path.exists():
-        st.error("schwab.csv not found")
+        st.error(f"File not found: {file_path}")
         return []
 
     lines = path.read_text(encoding="utf-8-sig", errors="ignore").splitlines()
 
-    # Find header row
     header_index = None
     for i, line in enumerate(lines):
         if line.startswith('"Symbol"') and '"Qty' in line:
@@ -70,23 +68,23 @@ def parse_schwab_csv(file_path="schwab.csv"):
         parts = [p.strip().strip('"') for p in line.split('","')]
 
         try:
-            ticker = parts[i_symbol].strip()
+            ticker = parts[i_symbol]
 
-            # skip totals / junk rows
-            if "Total" in ticker or ticker == "":
+            # skip junk rows
+            if "Total" in ticker or ticker.strip() == "":
                 continue
 
             shares = float(parts[i_qty].replace(",", ""))
 
-            value_raw = parts[i_value].replace("$", "").replace(",", "")
-            value = float(value_raw) if value_raw else 0.0
+            value = parts[i_value].replace("$", "").replace(",", "")
+            value = float(value) if value else 0.0
 
-            price_raw = parts[i_price].replace("$", "").replace(",", "")
-            price = float(price_raw) if price_raw else 0.0
+            price = parts[i_price].replace("$", "").replace(",", "")
+            price = float(price) if price else 0.0
 
             asset_type = parts[i_asset] if i_asset else "Equity"
 
-            # SIMPLE INCOME MODEL (since Schwab doesn't provide yield)
+            # fallback income model (Schwab does NOT provide yield)
             annual_income = value * 0.05
 
             holdings.append({
@@ -108,7 +106,7 @@ def parse_schwab_csv(file_path="schwab.csv"):
 # LOAD DATA
 # =========================================================
 
-holdings = parse_schwab_csv("data/schwab.csv")
+holdings = parse_schwab_csv(DATA_FILE)
 
 if not holdings:
     st.stop()
@@ -123,7 +121,7 @@ monthly_income = annual_income / 12
 portfolio_yield = annual_income / total_value if total_value else 0
 
 # =========================================================
-# SAVE TO DATABASE (HISTORY ENGINE)
+# SAVE TO DATABASE
 # =========================================================
 
 snapshot_id = save_snapshot(
@@ -145,7 +143,7 @@ for h in holdings:
     )
 
 # =========================================================
-# DASHBOARD UI
+# DASHBOARD
 # =========================================================
 
 col1, col2, col3, col4 = st.columns(4)
@@ -167,14 +165,14 @@ st.subheader("Holdings")
 st.dataframe(df, use_container_width=True)
 
 # =========================================================
-# HISTORY CHART
+# HISTORY
 # =========================================================
 
 st.subheader("Portfolio History")
 
 history = load_snapshots()
 
-if len(history) > 1:
+if history and len(history) > 1:
     hist_df = pd.DataFrame(history)
     hist_df["snapshot_time"] = pd.to_datetime(hist_df["snapshot_time"])
 
@@ -182,4 +180,4 @@ if len(history) > 1:
         hist_df.set_index("snapshot_time")[["portfolio_value"]]
     )
 else:
-    st.info("History will appear after multiple refreshes.")
+    st.info("History will build as you refresh the app.")
