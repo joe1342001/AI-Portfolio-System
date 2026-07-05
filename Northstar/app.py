@@ -105,7 +105,7 @@ def parse_schwab_csv(file_path="schwab.csv"):
 # LOAD DATA
 # =========================================================
 
-holdings = parse_schwab_csv("schwab.csv")
+holdings = parse_schwab_csv("data/schwab.csv")
 
 if not holdings:
     st.stop()
