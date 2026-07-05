@@ -1,108 +1,136 @@
-"""
-NorthStar Parser Module
-Version: 3.0
-
-Loads Schwab CSV exports and converts them into
-a standardized holdings list.
-"""
-
 from pathlib import Path
-import csv
 
 
-def clean_number(value):
-    """Convert strings like '$1,234.56' into float."""
-    if value is None:
-        return 0.0
+# =========================================================
+# PATH RESOLUTION (FIXES STREAMLIT CLOUD ISSUES)
+# =========================================================
 
-    value = str(value).strip()
-
-    if value in ("", "--", "N/A"):
-        return 0.0
-
-    value = (
-        value.replace("$", "")
-             .replace(",", "")
-             .replace("%", "")
-             .strip()
-    )
-
-    try:
-        return float(value)
-    except ValueError:
-        return 0.0
-
-
-def load_schwab_csv(filename="data/schwab.csv"):
+def get_base_path():
     """
-    Reads a Schwab positions export.
+    Always resolves project root correctly whether:
+    - running locally
+    - running in Streamlit Cloud
+    - running from submodule pages
+    """
+    return Path(__file__).resolve().parent.parent
 
-    Returns:
-        list[dict]
+
+# =========================================================
+# MAIN LOADER
+# =========================================================
+
+def load_schwab_csv(file_path="data/schwab.csv"):
+    """
+    Loads Schwab export CSV into structured holdings list.
     """
 
-    path = Path(filename)
+    base_path = get_base_path()
+    full_path = base_path / file_path
 
-    if not path.exists():
-        raise FileNotFoundError(f"Cannot find {filename}")
+    if not full_path.exists():
+        raise FileNotFoundError(f"Cannot find file at: {full_path}")
+
+    lines = full_path.read_text(encoding="utf-8-sig", errors="ignore").splitlines()
+
+    # =========================================================
+    # FIND HEADER ROW
+    # =========================================================
+
+    header_index = None
+
+    for i, line in enumerate(lines):
+        if '"Symbol"' in line and '"Qty' in line:
+            header_index = i
+            break
+
+    if header_index is None:
+        raise ValueError("Could not locate Schwab CSV header row")
+
+    headers = [h.strip().strip('"') for h in lines[header_index].split('","')]
+
+    # =========================================================
+    # COLUMN MAPPING
+    # =========================================================
+
+    def col(name):
+        for i, h in enumerate(headers):
+            if name.lower() in h.lower():
+                return i
+        return None
+
+    i_symbol = col("Symbol")
+    i_qty = col("Qty")
+    i_price = col("Price")
+    i_value = col("Mkt Val")
+    i_asset = col("Asset Type")
+
+    if i_symbol is None or i_qty is None:
+        raise ValueError("Missing required Schwab columns (Symbol or Qty)")
+
+    # =========================================================
+    # PARSE ROWS
+    # =========================================================
 
     holdings = []
 
-    with path.open("r", encoding="utf-8-sig", newline="") as f:
+    for line in lines[header_index + 1:]:
 
-        # Skip anything before the real header row.
-        while True:
-            position = f.tell()
-            line = f.readline()
+        if not line.startswith('"'):
+            continue
 
-            if not line:
-                raise ValueError("Could not locate Schwab header row.")
+        parts = [p.strip().strip('"') for p in line.split('","')]
 
-            if line.startswith('"Symbol"') or line.startswith("Symbol"):
-                f.seek(position)
-                break
+        try:
+            ticker = parts[i_symbol].strip()
 
-        reader = csv.DictReader(f)
-
-        for row in reader:
-
-            symbol = (row.get("Symbol") or "").strip()
-
-            if symbol in (
-                "",
-                "Positions Total",
-                "Cash & Cash Investments",
-            ):
+            # skip totals / empty rows
+            if not ticker or "Total" in ticker:
                 continue
 
-            qty = clean_number(row.get("Qty (Quantity)"))
-            market_value = clean_number(row.get("Mkt Val (Market Value)"))
-            price = clean_number(row.get("Price"))
-            cost_basis = clean_number(row.get("Cost Basis"))
+            shares = float(parts[i_qty].replace(",", ""))
 
-            holdings.append(
-                {
-                    "ticker": symbol,
-                    "shares": qty,
-                    "price": price,
-                    "market_value": market_value,
-                    "cost_basis": cost_basis,
-                    "asset_type": row.get("Asset Type", "").strip(),
-                    "description": row.get("Description", "").strip(),
-                }
-            )
+            price = 0.0
+            if i_price is not None and i_price < len(parts):
+                price_raw = parts[i_price].replace("$", "").replace(",", "")
+                price = float(price_raw) if price_raw else 0.0
+
+            value = 0.0
+            if i_value is not None and i_value < len(parts):
+                value_raw = parts[i_value].replace("$", "").replace(",", "")
+                value = float(value_raw) if value_raw else 0.0
+
+            asset_type = parts[i_asset] if i_asset and i_asset < len(parts) else "Equity"
+
+            # =====================================================
+            # INCOME MODEL (Schwab does NOT provide yield data)
+            # =====================================================
+            annual_income = value * 0.05
+
+            holdings.append({
+                "ticker": ticker,
+                "shares": shares,
+                "price": price,
+                "value": value,
+                "annual_income": annual_income,
+                "asset_type": asset_type
+            })
+
+        except Exception:
+            continue
 
     return holdings
 
 
-if __name__ == "__main__":
-    portfolio = load_schwab_csv()
+# =========================================================
+# OPTIONAL DEBUG FUNCTION
+# =========================================================
 
-    print(f"\nLoaded {len(portfolio)} holdings\n")
+def debug_path(file_path="data/schwab.csv"):
+    base_path = get_base_path()
+    full_path = base_path / file_path
 
-    for h in portfolio:
-        print(
-            f"{h['ticker']:6}"
-            f"{h['shares']:10.4f}"
-            f"   ${h['market_value']:12,.2f}"
-        )
+    return {
+        "base_path": str(base_path),
+        "full_path": str(full_path),
+        "exists": full_path.exists()
+    }
