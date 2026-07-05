@@ -8,7 +8,7 @@ from pathlib import Path
 HISTORY_FILE = "northstar_history.json"
 
 # -----------------------------
-# SAMPLE DATA (fallback if no file)
+# SAMPLE DATA
 # -----------------------------
 SAMPLE_PORTFOLIO = {
     "portfolio": [
@@ -25,7 +25,7 @@ def load_portfolio(file_path="data.json"):
     path = Path(file_path)
 
     if not path.exists():
-        print("⚠️ No data.json found — using built-in sample portfolio.\n")
+        print("⚠️ No data.json found — using sample portfolio.\n")
         return SAMPLE_PORTFOLIO["portfolio"]
 
     with open(path, "r") as f:
@@ -46,8 +46,8 @@ def analyze_portfolio(holdings):
         allocation[h["ticker"]] = value
 
     allocation_pct = {
-        ticker: (value / total_value) * 100
-        for ticker, value in allocation.items()
+        k: (v / total_value) * 100
+        for k, v in allocation.items()
     }
 
     weighted_yield = 0
@@ -62,20 +62,28 @@ def analyze_portfolio(holdings):
     }
 
 # -----------------------------
-# REPORT OUTPUT
+# REPORT
 # -----------------------------
-def generate_report(analysis):
-    print("\nNORTHSTAR REPORT")
-    print("-" * 40)
+def generate_report(analysis, performance=None):
+    print("\nNORTHSTAR REPORT (v0.3)")
+    print("-" * 45)
 
     print(f"Total Portfolio Value: ${analysis['total_value']:.2f}")
-    print(f"Estimated Dividend Yield: {analysis['portfolio_yield'] * 100:.2f}%\n")
+    print(f"Estimated Dividend Yield: {analysis['portfolio_yield'] * 100:.2f}%")
 
-    print("Allocation Breakdown:")
+    print("\nAllocation Breakdown:")
     for ticker, pct in analysis["allocation_pct"].items():
         print(f"  {ticker}: {pct:.2f}%")
 
-    print("-" * 40)
+    # PERFORMANCE BLOCK (NEW)
+    if performance:
+        print("\nPERFORMANCE METRICS:")
+        print(f"Start Value: ${performance['start']:.2f}")
+        print(f"Current Value: ${performance['current']:.2f}")
+        print(f"Total Return: {performance['return_pct']:.2f}%")
+        print(f"Trend: {performance['trend']}")
+
+    print("-" * 45)
 
 # -----------------------------
 # HISTORY
@@ -104,38 +112,36 @@ def create_snapshot(analysis):
     }
 
 # -----------------------------
-# MAIN (ONLY ONE)
+# PERFORMANCE ENGINE (NEW)
 # -----------------------------
-def main():
-    holdings = load_portfolio("data.json")
-    analysis = analyze_portfolio(holdings)
+def compute_performance(history):
+    if not history:
+        return None
 
-    generate_report(analysis)
+    # sort by time
+    history = sorted(history, key=lambda x: x["timestamp"])
 
-    snapshot = create_snapshot(analysis)
-    save_history(snapshot)
+    start = history[0]["total_value"]
+    current = history[-1]["total_value"]
 
-    print("\nSnapshot saved to history ✔")
+    if start == 0:
+        return None
 
-# -----------------------------
-# RUN
-# -----------------------------
-if __name__ == "__main__":
-    main()
+    return_pct = ((current - start) / start) * 100
 
-def create_snapshot(analysis):
+    if return_pct > 1:
+        trend = "📈 Uptrend"
+    elif return_pct < -1:
+        trend = "📉 Downtrend"
+    else:
+        trend = "➖ Flat"
+
     return {
-        "timestamp": datetime.datetime.now().isoformat(),
-        "total_value": analysis["total_value"],
-        "yield": analysis["portfolio_yield"]
+        "start": start,
+        "current": current,
+        "return_pct": return_pct,
+        "trend": trend
     }
-
-def save_history(entry):
-    history = load_history()
-    history.append(entry)
-
-    with open(HISTORY_FILE, "w") as f:
-        json.dump(history, f, indent=2)
 
 # -----------------------------
 # MAIN
@@ -146,8 +152,19 @@ def main():
 
     generate_report(analysis)
 
-    # history tracking
     snapshot = create_snapshot(analysis)
     save_history(snapshot)
 
+    history = load_history()
+    performance = compute_performance(history)
+
     print("\nSnapshot saved to history ✔")
+
+    # reprint with performance (clean UX)
+    generate_report(analysis, performance)
+
+# -----------------------------
+# RUN
+# -----------------------------
+if __name__ == "__main__":
+    main()
