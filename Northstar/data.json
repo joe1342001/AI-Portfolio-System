@@ -3,17 +3,17 @@
     {
       "ticker": "AGNC",
       "shares": 267.9006,
-      "dividend_yield": 0.01313
+    
     },
     {
       "ticker": "APIP",
       "shares": 115.0055,
-      "dividend_yield": 0.03483
+      
     },
     {
       "ticker": "ARCC",
       "shares": 271.3729,
-      "dividend_yield": 0.01027
+     
     }
   ]
 }
