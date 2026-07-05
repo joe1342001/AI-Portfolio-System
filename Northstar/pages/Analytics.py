@@ -1,107 +1,110 @@
 import streamlit as st
-from collections import defaultdict
+import pandas as pd
 
-from core.parser import load_schwab_csv
-from core.pricing import update_market_values
-from core.dividends import enrich_income
+from core.parser import load_schwab_csv, debug_path
+from database.database import load_snapshots
 
-st.set_page_config(page_title="Analytics", layout="wide")
+# =========================================================
+# PAGE SETUP
+# =========================================================
 
-st.title("📊 Portfolio Analytics")
+st.set_page_config(page_title="NorthStar Analytics", layout="wide")
+st.title("📊 NorthStar Analytics")
 
+# =========================================================
+# DEBUG (OPTIONAL - REMOVE LATER)
+# =========================================================
 
-# -----------------------------
-# LOAD DATA
-# -----------------------------
-@st.cache_data
-def load_data():
+with st.expander("Debug Path Info"):
+    st.write(debug_path("data/schwab.csv"))
+
+# =========================================================
+# LOAD HOLDINGS (SINGLE SOURCE OF TRUTH)
+# =========================================================
+
+try:
     holdings = load_schwab_csv("data/schwab.csv")
-    holdings = update_market_values(holdings)
-    holdings, total_income = enrich_income(holdings)
-    return holdings
+except Exception as e:
+    st.error(f"Failed to load holdings: {e}")
+    st.stop()
 
+if not holdings:
+    st.warning("No holdings found.")
+    st.stop()
 
-holdings = load_data()
+df = pd.DataFrame(holdings)
 
-total_value = sum(h["live_value"] for h in holdings)
+# =========================================================
+# BASIC METRICS
+# =========================================================
 
+total_value = df["value"].sum()
+total_income = df["annual_income"].sum()
+yield_pct = (total_income / total_value) * 100 if total_value else 0
 
-# -----------------------------
-# SECTOR BREAKDOWN
-# -----------------------------
-st.subheader("Asset Type Breakdown")
+col1, col2, col3 = st.columns(3)
 
-sector = defaultdict(float)
-
-for h in holdings:
-    sector[h.get("asset_type", "Unknown")] += h["live_value"]
-
-sector_data = [
-    {"Asset Type": k, "Value": v, "Weight %": (v / total_value) * 100}
-    for k, v in sector.items()
-]
-
-st.dataframe(sorted(sector_data, key=lambda x: x["Value"], reverse=True), use_container_width=True)
-
+col1.metric("Total Portfolio Value", f"${total_value:,.2f}")
+col2.metric("Annual Income", f"${total_income:,.2f}")
+col3.metric("Yield", f"{yield_pct:.2f}%")
 
 st.divider()
 
+# =========================================================
+# TOP HOLDINGS
+# =========================================================
 
-# -----------------------------
-# TOP POSITIONS (RISK CONCENTRATION)
-# -----------------------------
 st.subheader("Top Holdings by Value")
 
-top_positions = sorted(holdings, key=lambda x: x["live_value"], reverse=True)[:10]
+top_holdings = df.sort_values("value", ascending=False)
 
-for h in top_positions:
-    weight = (h["live_value"] / total_value) * 100
-
-    st.write(
-        f"**{h['ticker']}** → "
-        f"${h['live_value']:,.2f} "
-        f"({weight:.2f}% of portfolio)"
-    )
-
-
-st.divider()
-
-
-# -----------------------------
-# RISK METRICS
-# -----------------------------
-st.subheader("Risk & Diversification Metrics")
-
-# concentration risk
-top_weight = top_positions[0]["live_value"] / total_value if total_value else 0
-
-if top_weight > 0.20:
-    st.error("High concentration risk: top holding > 20%")
-
-elif top_weight > 0.10:
-    st.warning("Moderate concentration risk")
-
-else:
-    st.success("Well diversified by position size")
-
-
-# income vs non-income proxy
-income_tickers = {"JEPI","JEPQ","QYLD","QQQI","SPYI","AIPI","FEPI","HDV","DIVO","YYY"}
-
-income_value = sum(
-    h["live_value"]
-    for h in holdings
-    if h["ticker"] in income_tickers
+st.dataframe(
+    top_holdings[["ticker", "shares", "price", "value", "annual_income"]],
+    use_container_width=True
 )
 
-income_ratio = income_value / total_value if total_value else 0
+# =========================================================
+# ALLOCATION BY ASSET TYPE
+# =========================================================
 
-st.metric("Income Strategy Exposure", f"{income_ratio*100:.2f}%")
+st.subheader("Asset Allocation")
 
+alloc = df.groupby("asset_type")["value"].sum().reset_index()
+alloc["percent"] = alloc["value"] / alloc["value"].sum() * 100
 
-if income_ratio > 0.6:
-    st.info("Portfolio is heavily income-focused.")
-elif income_ratio > 0.3:
-    st.info("Balanced income/growth mix.")
+st.bar_chart(alloc.set_index("asset_type")["value"])
+
+st.dataframe(alloc, use_container_width=True)
+
+# =========================================================
+# INCOME BREAKDOWN
+# =========================================================
+
+st.subheader("Income Breakdown")
+
+income_df = df.sort_values("annual_income", ascending=False)
+
+st.bar_chart(income_df.set_index("ticker")["annual_income"])
+
+st.dataframe(
+    income_df[["ticker", "annual_income", "value"]],
+    use_container_width=True
+)
+
+# =========================================================
+# SNAPSHOT HISTORY (SQLite)
+# =========================================================
+
+st.subheader("Portfolio History")
+
+history = load_snapshots()
+
+if history and len(history) > 1:
+    hist_df = pd.DataFrame(history)
+    hist_df["snapshot_time"] = pd.to_datetime(hist_df["snapshot_time"])
+
+    st.line_chart(
+        hist_df.set_index("snapshot_time")[["portfolio_value"]]
+    )
 else:
-    st.info("Growth-leaning allocation.")
+    st.info("History will appear after multiple app refreshes.")
