@@ -87,9 +87,7 @@ def parse_schwab_csv(file_path):
 
             asset_type = parts[i_asset] if i_asset else "Equity"
 
-            # fallback income model (Schwab does NOT provide yield)
-            annual_income = value * 0.05
-
+         
             holdings.append({
                 "ticker": ticker,
                 "shares": shares,
