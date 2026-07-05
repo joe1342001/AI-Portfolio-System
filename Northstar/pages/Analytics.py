@@ -1,9 +1,14 @@
+import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 import streamlit as st
 import pandas as pd
 
-from core.parser import load_schwab_csv, debug_path
+from core.parser import load_schwab_csv
+from core.portfolio import load_portfolio
 from database.database import load_snapshots
-
 # =========================================================
 # PAGE SETUP
 # =========================================================
