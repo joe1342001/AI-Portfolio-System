@@ -2,6 +2,9 @@ import json
 import datetime
 from pathlib import Path
 
+# -----------------------------
+# CONFIG
+# -----------------------------
 HISTORY_FILE = "northstar_history.json"
 
 # -----------------------------
@@ -14,7 +17,6 @@ SAMPLE_PORTFOLIO = {
         {"ticker": "SCHD", "shares": 25, "price": 78.40, "dividend_yield": 0.0340}
     ]
 }
-
 
 # -----------------------------
 # LOAD PORTFOLIO
@@ -31,7 +33,6 @@ def load_portfolio(file_path="data.json"):
 
     return data["portfolio"]
 
-
 # -----------------------------
 # ANALYSIS ENGINE
 # -----------------------------
@@ -39,19 +40,16 @@ def analyze_portfolio(holdings):
     total_value = 0
     allocation = {}
 
-    # compute values
     for h in holdings:
         value = h["shares"] * h["price"]
         total_value += value
         allocation[h["ticker"]] = value
 
-    # allocation %
     allocation_pct = {
         ticker: (value / total_value) * 100
         for ticker, value in allocation.items()
     }
 
-    # weighted dividend yield
     weighted_yield = 0
     for h in holdings:
         weight = (h["shares"] * h["price"]) / total_value
@@ -62,7 +60,6 @@ def analyze_portfolio(holdings):
         "allocation_pct": allocation_pct,
         "portfolio_yield": weighted_yield
     }
-
 
 # -----------------------------
 # REPORT OUTPUT
@@ -80,6 +77,9 @@ def generate_report(analysis):
 
     print("-" * 40)
 
+# -----------------------------
+# HISTORY
+# -----------------------------
 def load_history():
     path = Path(HISTORY_FILE)
 
@@ -88,6 +88,40 @@ def load_history():
 
     with open(path, "r") as f:
         return json.load(f)
+
+def save_history(entry):
+    history = load_history()
+    history.append(entry)
+
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=2)
+
+def create_snapshot(analysis):
+    return {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "total_value": analysis["total_value"],
+        "yield": analysis["portfolio_yield"]
+    }
+
+# -----------------------------
+# MAIN (ONLY ONE)
+# -----------------------------
+def main():
+    holdings = load_portfolio("data.json")
+    analysis = analyze_portfolio(holdings)
+
+    generate_report(analysis)
+
+    snapshot = create_snapshot(analysis)
+    save_history(snapshot)
+
+    print("\nSnapshot saved to history ✔")
+
+# -----------------------------
+# RUN
+# -----------------------------
+if __name__ == "__main__":
+    main()
 
 def create_snapshot(analysis):
     return {
