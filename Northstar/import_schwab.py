@@ -2,81 +2,61 @@ import csv
 from pathlib import Path
 from io import StringIO
 
-def load_schwab(csv_file):
+def parse_schwab(csv_file):
     path = Path(csv_file)
 
     if not path.exists():
         print("❌ File not found:", csv_file)
         return []
 
-    raw = path.read_text(encoding="utf-8-sig", errors="ignore").splitlines()
+    raw_lines = path.read_text(encoding="utf-8-sig", errors="ignore").splitlines()
 
     # -----------------------------
-    # FIND REAL HEADER ROW
+    # STEP 1: FIND EXACT HEADER LINE
     # -----------------------------
     header_index = None
 
-    for i, line in enumerate(raw):
-        line_lower = line.lower()
-
-        if "symbol" in line_lower and "qty" in line_lower:
-            header_index = i
-            break
-
-        if "symbol" in line_lower and "quantity" in line_lower:
+    for i, line in enumerate(raw_lines):
+        if line.startswith('"Symbol"') and '"Qty' in line:
             header_index = i
             break
 
     if header_index is None:
-        print("❌ Could not locate Schwab data table in file.")
-        print("First line preview:", raw[0])
+        print("❌ Schwab header not found")
+        print("First line:", raw_lines[0])
         return []
 
-    clean_data = "\n".join(raw[header_index:])
+    csv_data = "\n".join(raw_lines[header_index:])
 
-    reader = csv.DictReader(StringIO(clean_data))
+    reader = csv.DictReader(StringIO(csv_data))
 
     holdings = []
 
+    # -----------------------------
+    # STEP 2: FIELD MAPPING (FIXED FOR YOUR FORMAT)
+    # -----------------------------
     for row in reader:
         try:
-            ticker = None
-            shares = None
-            value = None
-            asset_type = None
+            ticker = row.get("Symbol", "").strip().upper()
 
-            for k, v in row.items():
-                lk = k.lower()
+            qty_raw = row.get("Qty (Quantity)", "0")
+            qty = float(qty_raw.replace(",", ""))
 
-                if "symbol" in lk:
-                    ticker = v
+            asset_type = row.get("Asset Type", "Equity").strip()
 
-                if "qty" in lk or "quantity" in lk:
-                    shares = v
+            market_val_raw = row.get("Mkt Val (Market Value)", "0")
+            market_val = float(
+                market_val_raw.replace("$", "").replace(",", "")
+            )
 
-                if "market val" in lk:
-                    value = v
-
-                if "asset type" in lk:
-                    asset_type = v
-
-            if not ticker or not shares:
+            if not ticker or qty <= 0:
                 continue
-
-            ticker = ticker.strip().upper()
-            shares = float(shares)
-
-            # clean value (remove $)
-            if value:
-                value = float(value.replace("$", "").replace(",", ""))
-            else:
-                value = 0.0
 
             holdings.append({
                 "ticker": ticker,
-                "shares": shares,
-                "value": value,
-                "asset_type": asset_type or "Equity"
+                "shares": qty,
+                "value": market_val,
+                "asset_type": asset_type
             })
 
         except Exception:
