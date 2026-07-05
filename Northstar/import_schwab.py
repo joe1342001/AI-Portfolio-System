@@ -1,6 +1,5 @@
-import csv
+import re
 from pathlib import Path
-from io import StringIO
 
 def parse_schwab(csv_file):
     path = Path(csv_file)
@@ -9,53 +8,83 @@ def parse_schwab(csv_file):
         print("❌ File not found:", csv_file)
         return []
 
-    raw_lines = path.read_text(encoding="utf-8-sig", errors="ignore").splitlines()
+    lines = path.read_text(encoding="utf-8-sig", errors="ignore").splitlines()
 
     # -----------------------------
-    # STEP 1: FIND EXACT HEADER LINE
+    # STEP 1: FIND HEADER LINE
     # -----------------------------
-    header_index = None
+    header_line = None
 
-    for i, line in enumerate(raw_lines):
+    for line in lines:
         if line.startswith('"Symbol"') and '"Qty' in line:
-            header_index = i
+            header_line = line
             break
 
-    if header_index is None:
-        print("❌ Schwab header not found")
-        print("First line:", raw_lines[0])
+    if not header_line:
+        print("❌ Could not find Schwab header row")
         return []
 
-    csv_data = "\n".join(raw_lines[header_index:])
+    headers = [h.strip().strip('"') for h in header_line.split('","')]
 
-    reader = csv.DictReader(StringIO(csv_data))
+    # column indexes (fixed mapping)
+    def find_index(name_contains):
+        for i, h in enumerate(headers):
+            if name_contains.lower() in h.lower():
+                return i
+        return None
+
+    i_symbol = find_index("Symbol")
+    i_qty = find_index("Qty")
+    i_value = find_index("Mkt Val")
+    i_asset = find_index("Asset Type")
+
+    if i_symbol is None or i_qty is None:
+        print("❌ Required columns missing in header")
+        print(headers)
+        return []
 
     holdings = []
 
     # -----------------------------
-    # STEP 2: FIELD MAPPING (FIXED FOR YOUR FORMAT)
+    # STEP 2: PARSE ROWS MANUALLY
     # -----------------------------
-    for row in reader:
+    data_started = False
+
+    for line in lines:
+        if line == header_line:
+            data_started = True
+            continue
+
+        if not data_started:
+            continue
+
+        # skip junk lines
+        if not line.startswith('"'):
+            continue
+
+        # split safely on "," but keep structure
+        parts = [p.strip().strip('"') for p in line.split('","')]
+
         try:
-            ticker = row.get("Symbol", "").strip().upper()
+            ticker = parts[i_symbol].strip().upper()
 
-            qty_raw = row.get("Qty (Quantity)", "0")
-            qty = float(qty_raw.replace(",", ""))
+            qty_raw = parts[i_qty].replace(",", "")
+            qty = float(qty_raw) if qty_raw else 0
 
-            asset_type = row.get("Asset Type", "Equity").strip()
-
-            market_val_raw = row.get("Mkt Val (Market Value)", "0")
-            market_val = float(
-                market_val_raw.replace("$", "").replace(",", "")
-            )
-
-            if not ticker or qty <= 0:
+            if qty <= 0:
                 continue
+
+            value = 0.0
+            if i_value is not None and i_value < len(parts):
+                val_raw = parts[i_value].replace("$", "").replace(",", "")
+                value = float(val_raw) if val_raw else 0.0
+
+            asset_type = parts[i_asset] if i_asset and i_asset < len(parts) else "Equity"
 
             holdings.append({
                 "ticker": ticker,
                 "shares": qty,
-                "value": market_val,
+                "value": value,
                 "asset_type": asset_type
             })
 
