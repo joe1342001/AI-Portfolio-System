@@ -1,7 +1,16 @@
 from pathlib import Path
+import re
 
 # =========================================================
-# SCHWAB PARSER (YOUR FORMAT, SAFE + SIMPLE)
+# CLEAN HELPERS
+# =========================================================
+
+def clean_ticker(t):
+    return str(t).strip().upper().replace('"', "")
+
+
+# =========================================================
+# SCHWAB PARSER
 # =========================================================
 
 def load_schwab(file_path="schwab.csv"):
@@ -15,7 +24,6 @@ def load_schwab(file_path="schwab.csv"):
 
     holdings = []
 
-    # find header row
     header_index = None
     for i, line in enumerate(lines):
         if line.startswith('"Symbol"') and '"Qty' in line:
@@ -36,8 +44,15 @@ def load_schwab(file_path="schwab.csv"):
 
     i_symbol = col("Symbol")
     i_qty = col("Qty")
-    i_value = col("Mkt Val")
     i_asset = col("Asset Type")
+
+    def extract_value(line):
+        # grab largest dollar value in row (Schwab-safe method)
+        vals = re.findall(r"\$?[\d,]+\.\d{2}", line)
+        if not vals:
+            return 0.0
+        nums = [float(v.replace("$", "").replace(",", "")) for v in vals]
+        return max(nums)
 
     for line in lines[header_index + 1:]:
         if not line.startswith('"'):
@@ -46,17 +61,13 @@ def load_schwab(file_path="schwab.csv"):
         parts = [p.strip().strip('"') for p in line.split('","')]
 
         try:
-            ticker = parts[i_symbol].strip().upper()
+            ticker = clean_ticker(parts[i_symbol])
             qty = float(parts[i_qty].replace(",", ""))
 
             if qty <= 0:
                 continue
 
-            value = 0.0
-            if i_value is not None and i_value < len(parts):
-                raw = parts[i_value].replace("$", "").replace(",", "")
-                value = float(raw) if raw else 0.0
-
+            value = extract_value(line)
             asset_type = parts[i_asset] if i_asset and i_asset < len(parts) else "Equity"
 
             holdings.append({
@@ -73,11 +84,10 @@ def load_schwab(file_path="schwab.csv"):
 
 
 # =========================================================
-# YIELD MODEL (THIS IS REQUIRED — SCHWAB DOES NOT PROVIDE IT)
+# YIELD MODEL
 # =========================================================
 
 YIELD = {
-    # income ETFs / CEFs
     "JEPI": 0.07,
     "JEPQ": 0.09,
     "QYLD": 0.11,
@@ -85,28 +95,18 @@ YIELD = {
     "SPYI": 0.10,
     "FEPI": 0.12,
     "YYY": 0.12,
-
-    # REITs
     "AGNC": 0.13,
     "NLY": 0.11,
-
-    # BDC / energy income
     "ARCC": 0.10,
     "MPLX": 0.08,
     "EPD": 0.07,
-
-    # bond/cash proxy
     "SWVXX": 0.045,
-
-    # equity ETFs
     "HDV": 0.03,
     "SCHD": 0.03,
     "VGK": 0.03,
     "VWO": 0.03,
-
-    # fallback handled separately
+    "QQQ": 0.015
 }
-
 
 DEFAULT_YIELD = 0.02
 
@@ -120,14 +120,14 @@ def calculate_income(holdings):
     total_income = 0
 
     for h in holdings:
-        ticker = h["ticker"]
+        ticker = clean_ticker(h["ticker"])
         value = float(h.get("value", 0))
 
         total_value += value
 
-        y = YIELD.get(ticker, DEFAULT_YIELD)
+        yield_rate = YIELD.get(ticker, DEFAULT_YIELD)
 
-        total_income += value * y
+        total_income += value * yield_rate
 
     return total_value, total_income
 
@@ -139,7 +139,7 @@ def calculate_income(holdings):
 def report(holdings, total_value, income):
     monthly = income / 12
 
-    print("\nNORTHSTAR v1.2 — SCHWAB INCOME MODEL")
+    print("\nNORTHSTAR v1.2.1 — FIXED INCOME ENGINE")
     print("-" * 55)
 
     print(f"Portfolio Value: ${total_value:,.2f}")
@@ -149,10 +149,12 @@ def report(holdings, total_value, income):
     print("\nTop Income Contributors:")
 
     ranked = []
+
     for h in holdings:
-        ticker = h["ticker"]
-        value = h["value"]
+        ticker = clean_ticker(h["ticker"])
+        value = float(h["value"])
         y = YIELD.get(ticker, DEFAULT_YIELD)
+
         ranked.append((ticker, value * y, y))
 
     ranked.sort(key=lambda x: x[1], reverse=True)
