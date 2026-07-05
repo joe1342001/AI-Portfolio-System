@@ -1,8 +1,7 @@
-import json
 from pathlib import Path
 
 # =========================================================
-# SCHWAB PARSER (ROBUST + STABLE)
+# SCHWAB PARSER (YOUR FORMAT, SAFE + SIMPLE)
 # =========================================================
 
 def load_schwab(file_path="schwab.csv"):
@@ -16,23 +15,19 @@ def load_schwab(file_path="schwab.csv"):
 
     holdings = []
 
-    # ---------------------------------------------------------
-    # FIND HEADER ROW
-    # ---------------------------------------------------------
+    # find header row
     header_index = None
-
     for i, line in enumerate(lines):
         if line.startswith('"Symbol"') and '"Qty' in line:
             header_index = i
             break
 
     if header_index is None:
-        print("❌ Could not locate Schwab CSV header row")
+        print("❌ Schwab header not found")
         return []
 
     headers = [h.strip().strip('"') for h in lines[header_index].split('","')]
 
-    # helper: find column index safely
     def col(name):
         for i, h in enumerate(headers):
             if name.lower() in h.lower():
@@ -41,22 +36,9 @@ def load_schwab(file_path="schwab.csv"):
 
     i_symbol = col("Symbol")
     i_qty = col("Qty")
+    i_value = col("Mkt Val")
     i_asset = col("Asset Type")
 
-    # IMPORTANT: do NOT rely on index for value (Schwab shifts it sometimes)
-    def extract_value(parts, headers):
-        for i, h in enumerate(headers):
-            if "mkt val" in h.lower():
-                try:
-                    raw = parts[i].replace("$", "").replace(",", "").strip()
-                    return float(raw) if raw else 0.0
-                except:
-                    return 0.0
-        return 0.0
-
-    # ---------------------------------------------------------
-    # PARSE ROWS
-    # ---------------------------------------------------------
     for line in lines[header_index + 1:]:
         if not line.startswith('"'):
             continue
@@ -64,137 +46,7 @@ def load_schwab(file_path="schwab.csv"):
         parts = [p.strip().strip('"') for p in line.split('","')]
 
         try:
-            if i_symbol is None or i_qty is None:
-                continue
-
             ticker = parts[i_symbol].strip().upper()
-            qty = float(parts[i_qty].replace(",", ""))
-
-            if qty <= 0:
-                continue
-
-            value = extract_value(parts, headers)
-            asset_type = parts[i_asset] if i_asset and i_asset < len(parts) else "Equity"
-
-            holdings.append({
-                "ticker": ticker,
-                "shares": qty,
-                "value": value,
-                "asset_type": asset_type
-            })
-
-        except Exception:
-            continue
-
-    return holdings
-
-
-# =========================================================
-# INCOME MODEL
-# =========================================================
-
-YIELD_MAP = {
-    "Equity": 0.02,
-    "ETFs & Closed End Funds": 0.08,
-    "Cash and Money Market": 0.045,
-    "REIT": 0.10
-}
-
-TICKER_YIELD = {
-    "AGNC": 0.13,
-    "ARCC": 0.10,
-    "NLY": 0.11,
-    "MPLX": 0.08,
-    "EPD": 0.07,
-    "JEPI": 0.07,
-    "JEPQ": 0.09,
-    "QYLD": 0.11,
-    "QQQI": 0.10,
-    "SPYI": 0.10,
-    "FEPI": 0.12,
-    "YYY": 0.12,
-    "SWVXX": 0.045,
-    "HDV": 0.03,
-    "VGK": 0.03,
-    "VWO": 0.03
-}
-
-
-def calculate_income(holdings):
-    total_value = 0
-    total_income = 0
-
-    for h in holdings:
-        value = float(h.get("value", 0))
-        ticker = h["ticker"]
-        asset_type = h.get("asset_type", "Equity")
-
-        total_value += value
-
-        if ticker in TICKER_YIELD:
-            y = TICKER_YIELD[ticker]
-        else:
-            y = YIELD_MAP.get(asset_type, 0.02)
-
-        total_income += value * y
-
-    return total_value, total_income
-
-
-# =========================================================
-# REPORT
-# =========================================================
-
-def report(holdings, total_value, income):
-    monthly = income / 12
-
-    print("\nNORTHSTAR v1.1.1 — SCHWAB INCOME ENGINE")
-    print("-" * 55)
-
-    print(f"Portfolio Value: ${total_value:,.2f}")
-    print(f"Annual Income:   ${income:,.2f}")
-    print(f"Monthly Income:  ${monthly:,.2f}")
-
-    print("\nTop Income Contributors:")
-
-    ranked = []
-
-    for h in holdings:
-        value = float(h.get("value", 0))
-        ticker = h["ticker"]
-
-        y = TICKER_YIELD.get(ticker, YIELD_MAP.get(h["asset_type"], 0.02))
-        ranked.append((ticker, value * y, y))
-
-    ranked.sort(key=lambda x: x[1], reverse=True)
-
-    for t, inc, y in ranked[:10]:
-        print(f"{t:6}  ${inc:10,.2f}   ({y*100:.1f}%)")
-
-    print("-" * 55)
-
-
-# =========================================================
-# MAIN
-# =========================================================
-
-def main():
-    holdings = load_schwab("schwab.csv")
-
-    if not holdings:
-        print("❌ No holdings loaded")
-        return
-
-    total_value, income = calculate_income(holdings)
-
-    report(holdings, total_value, income)
-
-
-if __name__ == "__main__":
-    main()
-        try:
-            ticker = parts[i_symbol].strip().upper()
-
             qty = float(parts[i_qty].replace(",", ""))
 
             if qty <= 0:
@@ -202,8 +54,8 @@ if __name__ == "__main__":
 
             value = 0.0
             if i_value is not None and i_value < len(parts):
-                value = parts[i_value].replace("$", "").replace(",", "")
-                value = float(value) if value else 0.0
+                raw = parts[i_value].replace("$", "").replace(",", "")
+                value = float(raw) if raw else 0.0
 
             asset_type = parts[i_asset] if i_asset and i_asset < len(parts) else "Equity"
 
@@ -221,22 +73,11 @@ if __name__ == "__main__":
 
 
 # =========================================================
-# INCOME ENGINE (SCHWAB REALISTIC MODEL)
+# YIELD MODEL (THIS IS REQUIRED — SCHWAB DOES NOT PROVIDE IT)
 # =========================================================
 
-YIELD_MAP = {
-    "Equity": 0.02,
-    "ETFs & Closed End Funds": 0.08,
-    "Cash and Money Market": 0.045,
-    "REIT": 0.10
-}
-
-TICKER_YIELD = {
-    "AGNC": 0.13,
-    "ARCC": 0.10,
-    "NLY": 0.11,
-    "MPLX": 0.08,
-    "EPD": 0.07,
+YIELD = {
+    # income ETFs / CEFs
     "JEPI": 0.07,
     "JEPQ": 0.09,
     "QYLD": 0.11,
@@ -244,28 +85,47 @@ TICKER_YIELD = {
     "SPYI": 0.10,
     "FEPI": 0.12,
     "YYY": 0.12,
+
+    # REITs
+    "AGNC": 0.13,
+    "NLY": 0.11,
+
+    # BDC / energy income
+    "ARCC": 0.10,
+    "MPLX": 0.08,
+    "EPD": 0.07,
+
+    # bond/cash proxy
     "SWVXX": 0.045,
+
+    # equity ETFs
     "HDV": 0.03,
+    "SCHD": 0.03,
     "VGK": 0.03,
-    "VWO": 0.03
+    "VWO": 0.03,
+
+    # fallback handled separately
 }
 
 
+DEFAULT_YIELD = 0.02
+
+
+# =========================================================
+# INCOME ENGINE
+# =========================================================
+
 def calculate_income(holdings):
-    total_income = 0
     total_value = 0
+    total_income = 0
 
     for h in holdings:
         ticker = h["ticker"]
         value = float(h.get("value", 0))
-        asset_type = h.get("asset_type", "Equity")
 
         total_value += value
 
-        if ticker in TICKER_YIELD:
-            y = TICKER_YIELD[ticker]
-        else:
-            y = YIELD_MAP.get(asset_type, 0.02)
+        y = YIELD.get(ticker, DEFAULT_YIELD)
 
         total_income += value * y
 
@@ -279,7 +139,7 @@ def calculate_income(holdings):
 def report(holdings, total_value, income):
     monthly = income / 12
 
-    print("\nNORTHSTAR v1.1 — SCHWAB INCOME ENGINE")
+    print("\nNORTHSTAR v1.2 — SCHWAB INCOME MODEL")
     print("-" * 55)
 
     print(f"Portfolio Value: ${total_value:,.2f}")
@@ -289,17 +149,15 @@ def report(holdings, total_value, income):
     print("\nTop Income Contributors:")
 
     ranked = []
-
     for h in holdings:
         ticker = h["ticker"]
         value = h["value"]
-
-        y = TICKER_YIELD.get(ticker, YIELD_MAP.get(h["asset_type"], 0.02))
+        y = YIELD.get(ticker, DEFAULT_YIELD)
         ranked.append((ticker, value * y, y))
 
     ranked.sort(key=lambda x: x[1], reverse=True)
 
-    for t, inc, y in ranked[:8]:
+    for t, inc, y in ranked[:10]:
         print(f"{t:6}  ${inc:10,.2f}   ({y*100:.1f}%)")
 
     print("-" * 55)
