@@ -7,8 +7,8 @@ import re
 
 def clean_text(x):
     x = str(x)
-    x = re.sub(r'\s+', '', x)        # remove all whitespace
-    x = re.sub(r'[^\x21-\x7E]', '', x)  # remove hidden unicode
+    x = re.sub(r'\s+', '', x)          # remove all whitespace
+    x = re.sub(r'[^\x21-\x7E]', '', x)  # remove hidden chars
     return x.upper()
 
 
@@ -137,7 +137,7 @@ def calculate_income(holdings):
 # =========================================================
 
 def report(holdings, total_value, income):
-    print("\nNORTHSTAR v1.6 — FINAL SYSTEM")
+    print("\nNORTHSTAR v1.7 — PORTFOLIO ENGINE")
     print("-" * 55)
 
     print(f"Portfolio Value: ${total_value:,.2f}")
@@ -164,34 +164,34 @@ def report(holdings, total_value, income):
 
 
 # =========================================================
-# COMMAND INTERFACE (THIS WAS MISSING BEFORE)
+# MENU SYSTEM (THIS IS WHAT YOU WERE MISSING)
 # =========================================================
 
-def command_loop(holdings, total_value, income):
-    print("\nCommands:")
-    print("  income  - show income")
-    print("  value   - show portfolio value")
-    print("  report  - full report")
-    print("  exit")
-
+def menu(holdings, total_value, income):
     while True:
-        cmd = input("\nNorthStar > ").strip().lower()
+        print("\n===== NORTHSTAR MENU =====")
+        print("1. Portfolio Value")
+        print("2. Income")
+        print("3. Full Report")
+        print("4. Exit")
 
-        if cmd == "income":
+        choice = input("\nSelect option: ").strip()
+
+        if choice == "1":
+            print(f"\nPortfolio Value: ${total_value:,.2f}")
+
+        elif choice == "2":
             print(f"\nAnnual Income:  ${income:,.2f}")
             print(f"Monthly Income: ${income/12:,.2f}")
 
-        elif cmd == "value":
-            print(f"\nPortfolio Value: ${total_value:,.2f}")
-
-        elif cmd == "report":
+        elif choice == "3":
             report(holdings, total_value, income)
 
-        elif cmd == "exit":
+        elif choice == "4":
             break
 
         else:
-            print("Unknown command")
+            print("Invalid option")
 
 
 # =========================================================
@@ -209,7 +209,7 @@ def main():
 
     report(holdings, total_value, income)
 
-    command_loop(holdings, total_value, income)
+    menu(holdings, total_value, income)
 
 
 if __name__ == "__main__":
