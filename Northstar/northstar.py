@@ -1,11 +1,13 @@
 import json
 import datetime
 from pathlib import Path
+import matplotlib.pyplot as plt
 
 # -----------------------------
 # CONFIG
 # -----------------------------
 HISTORY_FILE = "northstar_history.json"
+CHART_FILE = "northstar_chart.png"
 
 # -----------------------------
 # SAMPLE DATA
@@ -29,9 +31,7 @@ def load_portfolio(file_path="data.json"):
         return SAMPLE_PORTFOLIO["portfolio"]
 
     with open(path, "r") as f:
-        data = json.load(f)
-
-    return data["portfolio"]
+        return json.load(f)["portfolio"]
 
 # -----------------------------
 # ANALYSIS ENGINE
@@ -65,7 +65,7 @@ def analyze_portfolio(holdings):
 # REPORT
 # -----------------------------
 def generate_report(analysis, performance=None):
-    print("\nNORTHSTAR REPORT (v0.3)")
+    print("\nNORTHSTAR REPORT (v0.4)")
     print("-" * 45)
 
     print(f"Total Portfolio Value: ${analysis['total_value']:.2f}")
@@ -75,12 +75,11 @@ def generate_report(analysis, performance=None):
     for ticker, pct in analysis["allocation_pct"].items():
         print(f"  {ticker}: {pct:.2f}%")
 
-    # PERFORMANCE BLOCK (NEW)
     if performance:
-        print("\nPERFORMANCE METRICS:")
-        print(f"Start Value: ${performance['start']:.2f}")
-        print(f"Current Value: ${performance['current']:.2f}")
-        print(f"Total Return: {performance['return_pct']:.2f}%")
+        print("\nPERFORMANCE:")
+        print(f"Start: ${performance['start']:.2f}")
+        print(f"Current: ${performance['current']:.2f}")
+        print(f"Return: {performance['return_pct']:.2f}%")
         print(f"Trend: {performance['trend']}")
 
     print("-" * 45)
@@ -90,7 +89,6 @@ def generate_report(analysis, performance=None):
 # -----------------------------
 def load_history():
     path = Path(HISTORY_FILE)
-
     if not path.exists():
         return []
 
@@ -112,13 +110,12 @@ def create_snapshot(analysis):
     }
 
 # -----------------------------
-# PERFORMANCE ENGINE (NEW)
+# PERFORMANCE ENGINE
 # -----------------------------
 def compute_performance(history):
     if not history:
         return None
 
-    # sort by time
     history = sorted(history, key=lambda x: x["timestamp"])
 
     start = history[0]["total_value"]
@@ -129,12 +126,7 @@ def compute_performance(history):
 
     return_pct = ((current - start) / start) * 100
 
-    if return_pct > 1:
-        trend = "📈 Uptrend"
-    elif return_pct < -1:
-        trend = "📉 Downtrend"
-    else:
-        trend = "➖ Flat"
+    trend = "📈 Uptrend" if return_pct > 1 else "📉 Downtrend" if return_pct < -1 else "➖ Flat"
 
     return {
         "start": start,
@@ -144,13 +136,41 @@ def compute_performance(history):
     }
 
 # -----------------------------
+# CHART ENGINE (NEW)
+# -----------------------------
+def generate_chart(history):
+    if len(history) < 2:
+        print("\nNot enough history to generate chart yet.")
+        return
+
+    history = sorted(history, key=lambda x: x["timestamp"])
+
+    dates = [h["timestamp"] for h in history]
+    values = [h["total_value"] for h in history]
+
+    # convert timestamps to readable x-axis labels
+    x = list(range(len(dates)))
+
+    plt.figure()
+    plt.plot(x, values, marker="o")
+
+    plt.title("NorthStar Portfolio Equity Curve")
+    plt.xlabel("Time (snapshots)")
+    plt.ylabel("Portfolio Value ($)")
+
+    plt.xticks(x, [d[5:16].replace("T", " ") for d in dates], rotation=45)
+
+    plt.tight_layout()
+    plt.savefig(CHART_FILE)
+
+    print(f"\nChart saved → {CHART_FILE}")
+
+# -----------------------------
 # MAIN
 # -----------------------------
 def main():
     holdings = load_portfolio("data.json")
     analysis = analyze_portfolio(holdings)
-
-    generate_report(analysis)
 
     snapshot = create_snapshot(analysis)
     save_history(snapshot)
@@ -158,10 +178,10 @@ def main():
     history = load_history()
     performance = compute_performance(history)
 
-    print("\nSnapshot saved to history ✔")
-
-    # reprint with performance (clean UX)
     generate_report(analysis, performance)
+    generate_chart(history)
+
+    print("\nSnapshot saved ✔")
 
 # -----------------------------
 # RUN
