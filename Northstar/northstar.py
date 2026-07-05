@@ -1,7 +1,6 @@
 import json
 import datetime
 from pathlib import Path
-import matplotlib.pyplot as plt
 import yfinance as yf
 
 # -----------------------------
@@ -11,7 +10,7 @@ HISTORY_FILE = "northstar_history.json"
 PRICE_CACHE_FILE = "northstar_price_cache.json"
 
 # -----------------------------
-# SAMPLE PORTFOLIO
+# PORTFOLIO DATA
 # -----------------------------
 SAMPLE_PORTFOLIO = {
     "portfolio": [
@@ -35,238 +34,156 @@ def load_portfolio(file_path="data.json"):
         return json.load(f)["portfolio"]
 
 # -----------------------------
-# PRICE CACHE SYSTEM (NEW)
+# PRICE ENGINE (simplified v0.8)
 # -----------------------------
-def load_price_cache():
-    path = Path(PRICE_CACHE_FILE)
-    if not path.exists():
-        return {}
-    with open(path, "r") as f:
-        return json.load(f)
-
-def save_price_cache(cache):
-    with open(PRICE_CACHE_FILE, "w") as f:
-        json.dump(cache, f, indent=2)
+def get_price(ticker):
+    try:
+        return float(yf.Ticker(ticker).fast_info["lastPrice"])
+    except:
+        return 0.0
 
 # -----------------------------
-# LIVE PRICE WITH RETRY + CACHE
+# ANALYSIS
 # -----------------------------
-def fetch_live_price(ticker, retries=2):
-    cache = load_price_cache()
-
-    # 1. try API
-    for attempt in range(retries):
-        try:
-            stock = yf.Ticker(ticker)
-            price = stock.fast_info["lastPrice"]
-
-            cache[ticker] = {
-                "price": float(price),
-                "timestamp": datetime.datetime.now().isoformat()
-            }
-
-            save_price_cache(cache)
-            return float(price)
-
-        except Exception:
-            continue
-
-    # 2. fallback to cache
-    if ticker in cache:
-        print(f"🛟 Using cached price for {ticker}")
-        return cache[ticker]["price"]
-
-    # 3. final fallback
-    print(f"⚠️ No price available for {ticker}, using 0")
-    return 0.0
-
-# -----------------------------
-# ANALYSIS ENGINE
-# -----------------------------
-def analyze_portfolio(holdings):
-    total_value = 0
-    allocation = {}
+def analyze(holdings):
+    total = 0
     enriched = []
+    allocation = {}
 
     for h in holdings:
-        price = fetch_live_price(h["ticker"])
-        value = h["shares"] * price
+        price = get_price(h["ticker"])
+        value = price * h["shares"]
 
-        total_value += value
+        enriched.append({**h, "price": price, "value": value})
+
+        total += value
         allocation[h["ticker"]] = value
 
-        enriched.append({
-            **h,
-            "price": price,
-            "value": value
-        })
-
     allocation_pct = {
-        k: (v / total_value) * 100 if total_value > 0 else 0
+        k: (v / total) * 100 if total > 0 else 0
         for k, v in allocation.items()
     }
 
-    weighted_yield = 0
-    dividend_income = 0
-
-    for h in enriched:
-        weight = h["value"] / total_value if total_value > 0 else 0
-        weighted_yield += weight * h["dividend_yield"]
-        dividend_income += h["value"] * h["dividend_yield"]
+    income = sum(h["value"] * h["dividend_yield"] for h in enriched)
 
     return {
-        "total_value": total_value,
-        "allocation_pct": allocation_pct,
-        "portfolio_yield": weighted_yield,
-        "annual_dividend_income": dividend_income,
-        "holdings": enriched
+        "total": total,
+        "holdings": enriched,
+        "allocation": allocation_pct,
+        "income": income
+    }
+
+# -----------------------------
+# INTELLIGENCE
+# -----------------------------
+def intelligence(data):
+    largest = max(data["allocation"].values()) if data["allocation"] else 0
+
+    return {
+        "largest_pct": largest,
+        "holdings": len(data["holdings"]),
+        "monthly_income": data["income"] / 12
     }
 
 # -----------------------------
 # HISTORY
 # -----------------------------
 def load_history():
-    path = Path(HISTORY_FILE)
-    if not path.exists():
+    p = Path(HISTORY_FILE)
+    if not p.exists():
         return []
-
-    with open(path, "r") as f:
-        return json.load(f)
+    return json.load(open(p))
 
 def save_history(entry):
-    history = load_history()
-    history.append(entry)
+    hist = load_history()
+    hist.append(entry)
+    json.dump(hist, open(HISTORY_FILE, "w"), indent=2)
 
-    with open(HISTORY_FILE, "w") as f:
-        json.dump(history, f, indent=2)
-
-def create_snapshot(analysis):
+def snapshot(data):
     return {
         "timestamp": datetime.datetime.now().isoformat(),
-        "total_value": analysis["total_value"],
-        "yield": analysis["portfolio_yield"]
+        "value": data["total"]
     }
 
 # -----------------------------
-# PERFORMANCE
+# SIMPLE PERFORMANCE
 # -----------------------------
-def compute_performance(history):
-    if not history:
+def performance(hist):
+    if len(hist) < 2:
         return None
 
-    history = sorted(history, key=lambda x: x["timestamp"])
+    hist = sorted(hist, key=lambda x: x["timestamp"])
 
-    start = history[0]["total_value"]
-    current = history[-1]["total_value"]
+    start = hist[0]["value"]
+    end = hist[-1]["value"]
 
-    if start == 0:
-        return None
+    pct = ((end - start) / start) * 100 if start else 0
 
-    pct = ((current - start) / start) * 100
     trend = "up" if pct > 1 else "down" if pct < -1 else "flat"
 
-    return {
-        "start": start,
-        "current": current,
-        "pct": pct,
-        "trend": trend
-    }
+    return {"start": start, "end": end, "pct": pct, "trend": trend}
 
 # -----------------------------
-# INTELLIGENCE
+# 🧠 CHAT ENGINE (NEW CORE FEATURE)
 # -----------------------------
-def portfolio_intelligence(analysis):
-    holdings = analysis["holdings"]
+def ask_northstar(question, data, intel, perf):
+    q = question.lower()
 
-    largest = max(analysis["allocation_pct"].values()) if holdings else 0
+    # portfolio value
+    if "value" in q or "worth" in q:
+        return f"Your portfolio is worth about ${data['total']:.2f}"
 
-    return {
-        "num_holdings": len(holdings),
-        "largest_position_pct": largest,
-        "annual_income": analysis["annual_dividend_income"],
-        "monthly_income": analysis["annual_dividend_income"] / 12
-    }
+    # income
+    if "income" in q or "dividend" in q:
+        return f"Estimated monthly income: ${intel['monthly_income']:.2f}"
 
-# -----------------------------
-# AI INSIGHTS
-# -----------------------------
-def ai_insight(analysis, performance, intel):
-    insights = []
+    # concentration risk
+    if "risk" in q or "divers" in q:
+        if intel["largest_pct"] > 40:
+            return "High concentration risk: one holding dominates your portfolio."
+        return "Your portfolio is reasonably diversified."
 
-    if intel["largest_position_pct"] > 40:
-        insights.append("High concentration risk in a single asset.")
+    # performance
+    if "performance" in q or "return" in q:
+        if perf:
+            return f"Return: {perf['pct']:.2f}% ({perf['trend']})"
+        return "Not enough history yet."
 
-    if intel["num_holdings"] < 5:
-        insights.append("Portfolio is lightly diversified.")
+    # holdings
+    if "holdings" in q or "stocks" in q:
+        names = ", ".join([h["ticker"] for h in data["holdings"]])
+        return f"You hold: {names}"
 
-    insights.append(
-        f"Estimated income: ${intel['monthly_income']:.2f}/month from dividends."
-    )
-
-    if performance:
-        if performance["pct"] > 5:
-            insights.append("Strong positive trend over time.")
-        elif performance["pct"] < -5:
-            insights.append("Portfolio under negative pressure.")
-
-    return insights
+    # default
+    return "I can help with value, income, risk, performance, or holdings."
 
 # -----------------------------
-# REPORT
-# -----------------------------
-def generate_report(analysis, performance=None, intel=None, insights=None):
-    print("\nNORTHSTAR REPORT (v0.7.1)")
-    print("-" * 60)
-
-    print(f"Total Value: ${analysis['total_value']:.2f}")
-    print(f"Dividend Yield: {analysis['portfolio_yield'] * 100:.2f}%")
-
-    print("\nHoldings:")
-    for h in analysis["holdings"]:
-        print(f"  {h['ticker']}: {h['shares']} shares @ ${h['price']:.2f} → ${h['value']:.2f}")
-
-    print("\nIncome:")
-    print(f"  Annual: ${analysis['annual_dividend_income']:.2f}")
-    print(f"  Monthly: ${analysis['annual_dividend_income']/12:.2f}")
-
-    if intel:
-        print("\nPortfolio Intelligence:")
-        print(f"  Holdings: {intel['num_holdings']}")
-        print(f"  Largest Position: {intel['largest_position_pct']:.2f}%")
-
-    if performance:
-        print("\nPerformance:")
-        print(f"  Return: {performance['pct']:.2f}%")
-        print(f"  Trend: {performance['trend']}")
-
-    if insights:
-        print("\nAI Insights:")
-        for i in insights:
-            print(f"  - {i}")
-
-    print("-" * 60)
-
-# -----------------------------
-# MAIN
+# MAIN LOOP (CHAT MODE)
 # -----------------------------
 def main():
     holdings = load_portfolio("data.json")
-    analysis = analyze_portfolio(holdings)
+    data = analyze(holdings)
+    intel = intelligence(data)
 
-    snapshot = create_snapshot(analysis)
-    save_history(snapshot)
+    hist = load_history()
+    perf = performance(hist)
 
-    history = load_history()
-    performance = compute_performance(history)
-    intel = portfolio_intelligence(analysis)
-    insights = ai_insight(analysis, performance, intel)
+    save_history(snapshot(data))
 
-    generate_report(analysis, performance, intel, insights)
+    print("\nNORTHSTAR v0.8 — AI PORTFOLIO ASSISTANT")
+    print("Type a question (or 'exit')\n")
 
-    print("\nSnapshot saved ✔")
+    while True:
+        q = input("You: ")
+
+        if q.lower() in ["exit", "quit"]:
+            break
+
+        response = ask_northstar(q, data, intel, perf)
+        print("NorthStar:", response)
 
 # -----------------------------
 # RUN
 # -----------------------------
 if __name__ == "__main__":
-    main()
+    main())
