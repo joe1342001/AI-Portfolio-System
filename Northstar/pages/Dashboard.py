@@ -41,6 +41,14 @@ col4.metric("Yield", f"{yield_pct:.2f}%")
 st.divider()
 
 # =========================================================
+# CORE METRICS
+# =========================================================
+
+total_value = df["value"].sum()
+annual_income = df["annual_income"].sum()
+monthly_income = annual_income / 12
+yield_pct = (annual_income / total_value) * 100 if total_value else 0
+# =========================================================
 # ALLOCATION OVERVIEW
 # =========================================================
 
