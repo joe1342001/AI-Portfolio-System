@@ -9,7 +9,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 import streamlit as st
 import pandas as pd
 
-from core.portfolio import load_portfolio
+from core.parser_debug import load_schwab_csv_debug as load_schwab_csv
 from database.database import load_snapshots
 
 # =========================================================
