@@ -1,0 +1,1 @@
+export default function App(){return <h1>NorthStar v0.1</h1>}
