@@ -12,13 +12,26 @@ PRICE_CACHE_FILE = "northstar_price_cache.json"
 # -----------------------------
 # PORTFOLIO DATA
 # -----------------------------
-SAMPLE_PORTFOLIO = {
-    "portfolio": [
-        {"ticker": "AAPL", "shares": 10, "dividend_yield": 0.0052},
-        {"ticker": "MSFT", "shares": 8, "dividend_yield": 0.0070},
-        {"ticker": "SCHD", "shares": 25, "dividend_yield": 0.0340}
-    ]
+PORTFOLIO = {
+  "portfolio": [
+    {
+      "ticker": "AGNC",
+      "shares": 267.9006,
+      "dividend_yield": 0.01313
+    },
+    {
+      "ticker": "AIPI",
+      "shares": 115.0055,
+      "dividend_yield": 0.03483
+    },
+    {
+      "ticker": "ARCC",
+      "shares": 271.3729,
+      "dividend_yield": 0.01027
+    }
+  ]
 }
+
 
 # -----------------------------
 # LOAD PORTFOLIO
