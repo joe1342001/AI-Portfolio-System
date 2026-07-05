@@ -16,23 +16,25 @@ TICKER_YIELD = {
 }
 
 
-def get_yield(ticker, asset_type):
+def get_yield(ticker, asset_type=None):
     t = ticker.upper()
 
+    # HARD FIX: NEVER default to 2%
     if t in TICKER_YIELD:
         return TICKER_YIELD[t]
 
-    at = (asset_type or "").lower()
+    asset_type = (asset_type or "").lower()
 
-    if "cash" in at:
-        return 0.045
+    if "reit" in asset_type:
+        return 0.09
 
-    if "reit" in at:
-        return 0.10
-
-    if "etf" in at:
+    if "etf" in asset_type:
         return 0.04
 
+    if "cash" in asset_type:
+        return 0.045
+
+    # realistic equity fallback (NOT 2%)
     return 0.015
 
 
