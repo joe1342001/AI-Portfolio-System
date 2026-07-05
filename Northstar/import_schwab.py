@@ -2,14 +2,11 @@ from pathlib import Path
 import re
 
 # =========================================================
-# CLEAN TICKERS
+# CLEAN
 # =========================================================
 
-def clean_ticker(t):
-    t = str(t)
-    t = re.sub(r'\s+', '', t)
-    t = re.sub(r'[^\x21-\x7E]', '', t)
-    return t.upper()
+def clean_text(x):
+    return re.sub(r'\s+', '', str(x)).upper()
 
 
 # =========================================================
@@ -20,21 +17,19 @@ def load_schwab(file_path="schwab.csv"):
     path = Path(file_path)
 
     if not path.exists():
-        print("❌ File not found:", file_path)
+        print("❌ Missing file")
         return []
 
     lines = path.read_text(encoding="utf-8-sig", errors="ignore").splitlines()
 
-    holdings = []
-
     header_index = None
     for i, line in enumerate(lines):
-        if line.startswith('"Symbol"') and '"Qty' in line:
+        if '"Symbol"' in line and '"Qty' in line:
             header_index = i
             break
 
     if header_index is None:
-        print("❌ Schwab header not found")
+        print("❌ Header not found")
         return []
 
     headers = [h.strip().strip('"') for h in lines[header_index].split('","')]
@@ -51,10 +46,10 @@ def load_schwab(file_path="schwab.csv"):
 
     def extract_value(line):
         vals = re.findall(r"\$?[\d,]+\.\d{2}", line)
-        if not vals:
-            return 0.0
         nums = [float(v.replace("$", "").replace(",", "")) for v in vals]
-        return max(nums)
+        return max(nums) if nums else 0.0
+
+    holdings = []
 
     for line in lines[header_index + 1:]:
         if not line.startswith('"'):
@@ -63,33 +58,39 @@ def load_schwab(file_path="schwab.csv"):
         parts = [p.strip().strip('"') for p in line.split('","')]
 
         try:
-            ticker = clean_ticker(parts[i_symbol])
+            ticker = clean_text(parts[i_symbol])
             qty = float(parts[i_qty].replace(",", ""))
 
             if qty <= 0:
                 continue
 
             value = extract_value(line)
-            asset_type = parts[i_asset] if i_asset and i_asset < len(parts) else "Equity"
+            asset = parts[i_asset] if i_asset else "Equity"
 
             holdings.append({
                 "ticker": ticker,
-                "shares": qty,
                 "value": value,
-                "asset_type": asset_type
+                "asset": clean_text(asset)
             })
 
-        except Exception:
+        except:
             continue
 
     return holdings
 
 
 # =========================================================
-# YIELD MODEL
+# INCOME MODEL (FAILSAFE)
 # =========================================================
 
-YIELD = {
+ASSET_YIELD = {
+    "EQUITY": 0.02,
+    "ETF": 0.04,
+    "CASH": 0.045,
+    "REIT": 0.10
+}
+
+TICKER_YIELD = {
     "JEPI": 0.07,
     "JEPQ": 0.09,
     "QYLD": 0.11,
@@ -110,25 +111,25 @@ YIELD = {
     "QQQ": 0.015
 }
 
-DEFAULT_YIELD = 0.02
-
-
-# =========================================================
-# INCOME ENGINE
-# =========================================================
 
 def calculate_income(holdings):
     total_value = 0
     total_income = 0
 
     for h in holdings:
-        ticker = clean_ticker(h["ticker"])
-        value = float(h.get("value", 0))
+        ticker = h["ticker"]
+        value = float(h["value"])
+        asset = h["asset"]
 
         total_value += value
 
-        yield_rate = YIELD.get(ticker, DEFAULT_YIELD)
-        total_income += value * yield_rate
+        # HARD PRIORITY: ticker yield
+        if ticker in TICKER_YIELD:
+            y = TICKER_YIELD[ticker]
+        else:
+            y = ASSET_YIELD.get(asset, 0.02)
+
+        total_income += value * y
 
     return total_value, total_income
 
@@ -138,64 +139,34 @@ def calculate_income(holdings):
 # =========================================================
 
 def report(holdings, total_value, income):
-    monthly = income / 12
-
-    print("\nNORTHSTAR v1.4 — PORTFOLIO ENGINE")
+    print("\nNORTHSTAR v1.5 — FAILSAFE INCOME ENGINE")
     print("-" * 55)
 
     print(f"Portfolio Value: ${total_value:,.2f}")
     print(f"Annual Income:   ${income:,.2f}")
-    print(f"Monthly Income:  ${monthly:,.2f}")
+    print(f"Monthly Income:  ${income/12:,.2f}")
 
-    print("\nTop Income Contributors:")
+    print("\nTop Contributors:")
 
     ranked = []
 
     for h in holdings:
-        ticker = clean_ticker(h["ticker"])
-        value = float(h["value"])
-        y = YIELD.get(ticker, DEFAULT_YIELD)
+        ticker = h["ticker"]
+        value = h["value"]
 
-        ranked.append((ticker, value * y, y))
+        if ticker in TICKER_YIELD:
+            y = TICKER_YIELD[ticker]
+        else:
+            y = 0.02
+
+        ranked.append((ticker, value * y))
 
     ranked.sort(key=lambda x: x[1], reverse=True)
 
-    for t, inc, y in ranked[:10]:
-        print(f"{t:6}  ${inc:10,.2f}   ({y*100:.1f}%)")
+    for t, inc in ranked[:10]:
+        print(f"{t:6}  ${inc:10,.2f}")
 
     print("-" * 55)
-
-
-# =========================================================
-# COMMAND SYSTEM (THIS FIXES YOUR "INCOME NOT SHOWING")
-# =========================================================
-
-def command_loop(holdings, total_value, income):
-    print("\nAvailable commands:")
-    print("  value")
-    print("  income")
-    print("  holdings")
-    print("  exit")
-
-    while True:
-        q = input("\nNorthStar > ").strip().lower()
-
-        if q == "value":
-            print(f"\nPortfolio Value: ${total_value:,.2f}")
-
-        elif q == "income":
-            print(f"\nAnnual Income:  ${income:,.2f}")
-            print(f"Monthly Income: ${income/12:,.2f}")
-
-        elif q == "holdings":
-            for h in holdings:
-                print(f"{h['ticker']} | ${h['value']:,.2f} | {h['shares']} shares")
-
-        elif q == "exit":
-            break
-
-        else:
-            print("Unknown command")
 
 
 # =========================================================
@@ -205,15 +176,11 @@ def command_loop(holdings, total_value, income):
 def main():
     holdings = load_schwab("schwab.csv")
 
-    if not holdings:
-        print("❌ No holdings loaded")
-        return
+    print("\nDEBUG: holdings loaded =", len(holdings))
 
     total_value, income = calculate_income(holdings)
 
     report(holdings, total_value, income)
-
-    command_loop(holdings, total_value, income)
 
 
 if __name__ == "__main__":
